@@ -4,10 +4,19 @@
 //! 键盘用扫描码注入，不受键盘布局和输入法影响。
 //! 光标在对方屏幕上时，本机光标停到一个看不见的位置（见 [`hider`]）。
 
+mod availability;
 pub(crate) mod hider;
+mod service;
+
+pub use service::{
+    WinInject, authorize as authorize_input_peer, install as install_input_service,
+    prepare as prepare_input_service, remove as remove_input_service, revoke as revoke_input_peer,
+    run as run_input_service, run_agent as run_input_agent, stop as stop_input_service,
+};
 
 use ferry_platform::{Error, InputInject, Result};
 use ferry_types::{InputEvent, KeyAction, KeyCode, LockKeys, MouseButton, Point};
+use windows::Win32::Foundation::{ERROR_SUCCESS, GetLastError, SetLastError};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetKeyState, INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBD_EVENT_FLAGS, KEYBDINPUT,
     KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_SCANCODE, MOUSE_EVENT_FLAGS,
@@ -27,25 +36,29 @@ use hider::CursorHider;
 
 /// 本机键鼠注入。
 #[derive(Debug)]
-pub struct WinInject {
+struct LocalInject {
     /// 第一次需要隐藏光标时才创建。
     hider: Option<CursorHider>,
 }
 
-impl WinInject {
+impl LocalInject {
     pub fn new() -> Self {
         ensure_dpi_aware();
         Self { hider: None }
     }
 }
 
-impl Default for WinInject {
+impl Default for LocalInject {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl InputInject for WinInject {
+impl InputInject for LocalInject {
+    fn check_available(&mut self) -> Result<()> {
+        availability::check()
+    }
+
     fn inject(&mut self, event: &InputEvent) -> Result<()> {
         match *event {
             InputEvent::PointerMotion { position } => {
@@ -166,11 +179,24 @@ fn mouse(dx: i32, dy: i32, data: u32, flags: MOUSE_EVENT_FLAGS) -> INPUT {
 
 fn send(input: INPUT) -> Result<()> {
     // SAFETY: 传入一个完整初始化的 INPUT，大小参数与之一致。
-    let sent = unsafe { SendInput(&[input], size_of::<INPUT>() as i32) };
+    // SendInput 被 UIPI 拦截时可能不设置错误代码，先清空，避免报出上一次调用遗留的错误。
+    let sent = unsafe {
+        SetLastError(ERROR_SUCCESS);
+        SendInput(&[input], size_of::<INPUT>() as i32)
+    };
     if sent == 1 {
         Ok(())
     } else {
-        Err(last_error("SendInput"))
+        // SAFETY: 紧接 SendInput 读取本线程的错误，不做其他系统调用。
+        if unsafe { GetLastError() } == ERROR_SUCCESS {
+            Err(Error::Os {
+                call: "SendInput",
+                detail: "Windows 未接受输入，也未提供错误代码；可能受前台程序权限或输入限制影响"
+                    .into(),
+            })
+        } else {
+            Err(last_error("SendInput"))
+        }
     }
 }
 

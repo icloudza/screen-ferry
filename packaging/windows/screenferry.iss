@@ -14,6 +14,7 @@
 #define AppName "ScreenFerry"
 #define AppExe "screenferry.exe"
 #define SettingsExe "screenferry-settings.exe"
+#define ServiceExe "screenferry-service.exe"
 #define Repo "https://github.com/icloudza/screen-ferry"
 
 [Setup]
@@ -50,6 +51,7 @@ CloseApplications=yes
 RestartApplications=no
 ; 开机自启登记在当前用户名下（HKCU）：安装时改成新的位置，卸载时删掉（见 [Code]）。
 UsedUserAreasWarning=no
+UsePreviousTasks=yes
 ; 按 Windows 的显示语言选：中文系统用简体中文，其他都用英文（排在第一个的语言），不弹出选择语言的对话框。
 LanguageDetectionMethod=uilanguage
 ShowLanguageDialog=no
@@ -63,9 +65,20 @@ en.AppComment=Share one keyboard and mouse across your computers
 chs.AppComment=在多台电脑之间共享一套键盘鼠标
 en.FirewallStatus=Configuring Windows Firewall…
 chs.FirewallStatus=正在设置 Windows 防火墙…
+en.SecureInput=Allow paired computers to control Windows permission prompts (UAC)
+chs.SecureInput=允许已配对的电脑操作 Windows 权限提示（UAC）
+en.ServiceStatus=Configuring secure input…
+chs.ServiceStatus=正在设置安全桌面输入…
+en.ServiceStopFailed=Unable to stop secure input. Close ScreenFerry and try again.
+chs.ServiceStopFailed=无法停止安全输入。请关闭 ScreenFerry 后重试。
+en.ServiceConfigureFailed=Unable to configure secure input. Use the default installation folder or leave secure input unchecked and try again.
+chs.ServiceConfigureFailed=无法设置安全输入。请使用默认安装位置，或取消安全输入选项后重试。
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+#ifdef SecureInputExperimental
+Name: "secureinput"; Description: "{cm:SecureInput}"; Flags: unchecked
+#endif
 
 [InstallDelete]
 ; 设置界面整个换新，不留旧版本的资源文件。
@@ -73,6 +86,7 @@ Type: filesandordirs; Name: "{app}\settings"
 
 [Files]
 Source: "{#SourceDir}\{#AppExe}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SourceDir}\{#ServiceExe}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\settings\*"; DestDir: "{app}\settings"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
@@ -93,6 +107,7 @@ Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags
 [UninstallRun]
 ; 先请 ScreenFerry 正常退出（归还键鼠、松开按键），还在的再强行结束，然后删掉防火墙规则。
 Filename: "{app}\{#AppExe}"; Parameters: "quit"; Flags: runhidden waituntilterminated; RunOnceId: "QuitApp"
+Filename: "{app}\{#ServiceExe}"; Parameters: "remove"; Flags: runhidden waituntilterminated; RunOnceId: "RemoveInputService"; Check: HasInputService
 Filename: "{sys}\taskkill.exe"; Parameters: "/F /IM {#AppExe} /IM {#SettingsExe}"; Flags: runhidden waituntilterminated; RunOnceId: "KillApp"
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""{#AppName}"""; Flags: runhidden waituntilterminated; RunOnceId: "RemoveFirewallRule"
 
@@ -107,6 +122,23 @@ var
 function WasRunning: Boolean;
 begin
   Result := Running;
+end;
+
+function SecureInputSelected: Boolean;
+begin
+#ifdef SecureInputExperimental
+  Result := WizardIsTaskSelected('secureinput');
+#else
+  Result := False;
+#endif
+end;
+
+function HasInputService: Boolean;
+var
+  Command: String;
+begin
+  Result := RegQueryStringValue(HKLM, 'SYSTEM\CurrentControlSet\Services\ScreenFerryInput', 'ImagePath', Command)
+    and (Pos(Lowercase(ExpandConstant('{app}\{#ServiceExe}')), Lowercase(Command)) > 0);
 end;
 
 { 安装前请正在运行的 ScreenFerry 退出，程序文件才能替换：
@@ -124,14 +156,50 @@ begin
     Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM {#AppExe} /IM {#SettingsExe} /IM screenferry_settings.exe',
       '', SW_HIDE, ewWaitUntilTerminated, Code);
   end;
+  { 停止旧服务及其 Job 中的代理，之后才能替换服务程序。旧版没有服务时直接跳过。 }
+  ExtractTemporaryFile('{#ServiceExe}');
+  { 必须运行新安装包里的工具，不能以管理员身份执行目标目录中可能被伪造的旧程序。 }
+  if not Exec(ExpandConstant('{tmp}\{#ServiceExe}'), 'stop', '', SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then
+  begin
+    Result := CustomMessage('ServiceStopFailed');
+    Exit;
+  end;
+  { 在复制文件前验证/创建受保护的应用目录。管理工具来自当前安装包的临时解出文件。 }
+  if SecureInputSelected then
+  begin
+    if not Exec(ExpandConstant('{tmp}\{#ServiceExe}'), 'prepare "' + ExpandConstant('{app}') + '"', '', SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then
+    begin
+      Result := CustomMessage('ServiceConfigureFailed');
+      Exit;
+    end;
+  end;
   Result := '';
 end;
 
 { 开着开机自启时，登记的可能还是旧的位置（例如解压版的文件夹），改成安装后的位置。 }
 procedure CurStepChanged(CurStep: TSetupStep);
+var
+  Action: String;
+  Tool: String;
+  Code: Integer;
 begin
-  if (CurStep = ssPostInstall) and RegValueExists(HKCU, RunKey, '{#AppName}') then
-    RegWriteStringValue(HKCU, RunKey, '{#AppName}', '"' + ExpandConstant('{app}\{#AppExe}') + '" --autostart');
+  if CurStep = ssPostInstall then
+  begin
+    if RegValueExists(HKCU, RunKey, '{#AppName}') then
+      RegWriteStringValue(HKCU, RunKey, '{#AppName}', '"' + ExpandConstant('{app}\{#AppExe}') + '" --autostart');
+    if SecureInputSelected then
+    begin
+      Action := 'install';
+      Tool := ExpandConstant('{app}\{#ServiceExe}');
+    end
+    else
+    begin
+      Action := 'remove';
+      Tool := ExpandConstant('{tmp}\{#ServiceExe}');
+    end;
+    if not Exec(Tool, Action, '', SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then
+      RaiseException(CustomMessage('ServiceConfigureFailed'));
+  end;
 end;
 
 { 卸载时删掉指向本程序的开机自启登记，登录时不再去找已经删掉的程序。 }

@@ -15,6 +15,7 @@ cargo-fuzz = true
 
 [dependencies]
 ferry-proto = { path = "../crates/ferry-proto" }
+ferry-trust = { path = "../crates/ferry-trust" }
 libfuzzer-sys = "0.4"
 
 [[bin]]
@@ -25,3 +26,10 @@ doc = false
 bench = false
 
 [workspace]
+
+[[bin]]
+name = "input_agent"
+path = "fuzz_targets/input_agent.rs"
+test = false
+doc = false
+bench = false

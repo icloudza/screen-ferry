@@ -9,6 +9,7 @@ pub mod capsule;
 pub mod clip_format;
 mod edge_switch;
 pub mod file_name;
+mod input_lease;
 mod key_mapper;
 mod layout;
 mod neighbors;
@@ -18,6 +19,7 @@ mod warp_jump;
 mod wheel_scale;
 
 pub use edge_switch::{EdgeSwitch, Transition};
+pub use input_lease::{INPUT_LEASE, InputLease, MAX_INPUT_REQUEST_MS};
 pub use key_mapper::KeyMapper;
 pub use layout::{Side, bounds};
 pub use neighbors::{Neighbors, Place};

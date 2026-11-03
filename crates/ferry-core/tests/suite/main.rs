@@ -6,6 +6,7 @@ mod capsule;
 mod clip_format;
 mod edge_switch;
 mod file_name;
+mod input_lease;
 mod key_mapper;
 mod layout;
 mod neighbors;

@@ -31,6 +31,7 @@ struct MockHost {
     autostart: Arc<AtomicBool>,
     settings_opened: Arc<AtomicU32>,
     capture: MockCapture,
+    inject: MockInject,
     verbose: Arc<AtomicBool>,
     /// 在访达里显示过的文件、打开过的文件夹，按先后。
     shown: Arc<Mutex<Vec<PathBuf>>>,
@@ -61,7 +62,7 @@ impl Host for MockHost {
         Ok(self.capture.clone())
     }
     fn inject(&self) -> ferry_platform::Result<MockInject> {
-        Ok(MockInject::new())
+        Ok(self.inject.clone())
     }
     fn displays(&self) -> MockDisplays {
         MockDisplays::new(vec![Display {
@@ -133,14 +134,20 @@ impl Daemon {
 
     /// 在已经准备好的数据目录上启动。
     async fn start_with(device: Device, host: MockHost) -> Self {
-        device
-            .store
-            .save_config(&Config {
+        Self::start_configured(
+            device,
+            host,
+            Config {
                 role: Role::Server,
                 announce: false,
                 ..Config::default()
-            })
-            .unwrap();
+            },
+        )
+        .await
+    }
+
+    async fn start_configured(device: Device, host: MockHost, config: Config) -> Self {
+        device.store.save_config(&config).unwrap();
         let (control, handle) = resident::control();
         let task = tokio::spawn(resident::run(device.store.clone(), host.clone(), control));
         let daemon = Self {
@@ -419,6 +426,96 @@ async fn first_pairing_is_confirmed_in_the_ui() {
 
     client.abort();
     daemon.task.abort();
+}
+
+#[tokio::test]
+async fn input_keeps_working_after_both_settings_windows_disconnect() {
+    use ferry_platform::CaptureEvent;
+    use ferry_types::{InputEvent, KeyAction, KeyCode};
+
+    use crate::support::{EDGE, eventually};
+
+    let server = Daemon::start(MockHost::default()).await;
+    let mut server_ui = server.ui().await;
+    let port = server_ui
+        .state_where("服务端已监听", |s| s.local.port.is_some())
+        .await
+        .local
+        .port
+        .unwrap();
+    let client = Daemon::start_configured(
+        Device::new(),
+        MockHost::default(),
+        Config {
+            role: Role::Client,
+            server: format!("127.0.0.1:{port}"),
+            clipboard: false,
+            ..Config::default()
+        },
+    )
+    .await;
+    let mut client_ui = client.ui().await;
+    for ui in [&mut server_ui, &mut client_ui] {
+        let id = ui
+            .wait("配对请求", |n| match n {
+                Notice::Pairing { prompt } => Some(prompt.id),
+                _ => None,
+            })
+            .await;
+        ui.send(Request::PairReply { id, accept: true }).await;
+    }
+    for ui in [&mut server_ui, &mut client_ui] {
+        ui.state_where("已连接", |s| s.link.status == LinkStatus::Connected)
+            .await;
+    }
+    drop(server_ui);
+    drop(client_ui);
+    // 给两端处理 IPC EOF 的时间，然后只通过键鼠和网络进行验证。
+    sleep(Duration::from_millis(200)).await;
+    eventually("没有设置界面也能切入被控端", || {
+        if server.host.capture.is_grabbed() {
+            return true;
+        }
+        server.host.capture.emit(CaptureEvent::Pointer {
+            position: EDGE,
+            dx: 1,
+            dy: 0,
+        });
+        false
+    })
+    .await;
+    let key = |action| InputEvent::Key {
+        code: KeyCode::LEFT_SHIFT,
+        action,
+    };
+    for action in [KeyAction::Down, KeyAction::Up] {
+        server.host.capture.emit(CaptureEvent::Key {
+            code: KeyCode::LEFT_SHIFT,
+            action,
+        });
+        eventually("没有界面时仍注入键盘事件", || {
+            client.host.inject.events().contains(&key(action))
+        })
+        .await;
+    }
+    server.host.capture.emit(CaptureEvent::Pointer {
+        position: EDGE,
+        dx: -50,
+        dy: 0,
+    });
+    eventually("没有界面时仍能返回", || {
+        !server.host.capture.is_grabbed()
+    })
+    .await;
+    let mut reopened = client.ui().await;
+    let state = reopened
+        .state_where("重开界面仍是原来的连接", |s| {
+            s.link.status == LinkStatus::Connected
+        })
+        .await;
+    assert!(state.problem.is_none());
+    server.task.abort();
+    client.task.abort();
 }
 
 #[tokio::test]

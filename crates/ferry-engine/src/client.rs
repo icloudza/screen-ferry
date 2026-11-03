@@ -23,7 +23,7 @@ use ferry_core::{Pressed, bounds};
 use ferry_net::discovery::{Browser, Lookup, pick};
 use ferry_net::{ClientStream, Framed, Tls};
 use ferry_platform::{Clipboard, Displays, Error as PlatformError, InputInject};
-use ferry_proto::{Capabilities, Channel, Hello, Message, RejectReason};
+use ferry_proto::{Capabilities, Channel, Hello, Message, RejectReason, SecureAction};
 use ferry_store::Store;
 use ferry_trust::{Fingerprint, Peer};
 use ferry_types::{DeviceSettings, Display, InputEvent, LockKeys, Point, Side, mark};
@@ -166,7 +166,8 @@ where
         events: config.events.clone(),
         clip_limit: config.clipboard_limit.clone(),
         in_session: false,
-        cursor_hidden: false,
+        secure_input: false,
+        cursor_hidden: Some(false),
         edge: config.edge.clone(),
         peer_side: None,
         server: None,
@@ -219,7 +220,13 @@ where
         let ok = result.is_ok();
         client.peer_side = None;
         client.edge.reset();
-        client.release_all();
+        if let Err(e) = client.release_all() {
+            warn!("松开按键失败，桌面恢复后重试：{e}");
+        }
+        if let Err(e) = client.inject.end_remote_input() {
+            warn!("结束安全输入会话：{e}");
+        }
+        client.secure_input = false;
         client.hide_cursor(false);
         client.active.send_replace(false);
         if std::mem::take(&mut client.in_session)
@@ -469,8 +476,10 @@ struct Client<I: InputInject, K, P> {
     clip_limit: ClipLimit,
     /// 已建立会话、还没报告断开。
     in_session: bool,
-    /// 本机光标是否被隐藏（光标在服务端屏幕上）。
-    cursor_hidden: bool,
+    /// true 时本机只转发签署动作；输入、锁定键和光标由代理原子执行。
+    secure_input: bool,
+    /// 本机光标是否被隐藏；调用失败时状态不确定，仍需重试或在退出时恢复。
+    cursor_hidden: Option<bool>,
     /// 边缘投递：报告本机光标和朝向服务端的那条边。
     edge: EdgeFeed,
     /// 服务端在本机的哪一侧；服务端说了才知道。
@@ -486,10 +495,14 @@ struct Client<I: InputInject, K, P> {
 /// 无论因为什么停下（包括整个引擎被关掉），都松开对方按着的键、让本机光标重新出现。
 impl<I: InputInject, K, P> Drop for Client<I, K, P> {
     fn drop(&mut self) {
+        if self.secure_input {
+            let _ = self.inject.end_remote_input();
+            return;
+        }
         for event in self.pressed.release_all(self.cursor) {
             let _ = self.inject.inject(&event);
         }
-        if self.cursor_hidden {
+        if self.cursor_hidden != Some(false) {
             let _ = self.inject.set_cursor_hidden(false);
         }
     }
@@ -504,15 +517,27 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
     ) -> Result<Ended> {
         let requested = target.via == Via::Requested;
         // 用户按地址连接时，把结果告诉用户。
+        let events = self.events.clone();
         let report = |error: Option<DialError>| {
             if let (true, Some(&addr)) = (requested, target.addrs.first()) {
-                self.events.emit(Event::Dialed {
+                events.emit(Event::Dialed {
                     address: addr.to_string(),
                     invite: false,
                     error,
                 });
             }
         };
+        // 上次因安全桌面或注入失败断开时，先等桌面恢复，再松开尚未成功释放的键。
+        // 不可用期间不建立新会话，避免控制端反复切入一个无法接受输入的桌面。
+        let ready = self
+            .inject
+            .check_available()
+            .map_err(Error::from)
+            .and_then(|()| self.release_all());
+        if let Err(e) = ready {
+            report(Some(DialError::of(&e)));
+            return Err(e);
+        }
         if target.via != Via::Remembered
             && let Some(&addr) = target.addrs.first()
         {
@@ -545,7 +570,12 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
             .cloned()
             .unwrap_or_else(|| DeviceSettings::new(server.to_hex()));
         self.drop_files = device.files;
-        let caps = capabilities(config.clipboard && device.clipboard, config.command_key);
+        let mut challenge = self.inject.remote_challenge(*server.as_bytes())?;
+        self.secure_input = challenge.is_some();
+        let mut caps = capabilities(config.clipboard && device.clipboard, config.command_key);
+        if !self.secure_input {
+            caps.remove(Capabilities::SECURE_INPUT);
+        }
         let hello = Hello::new(Channel::Input, caps, 0, config.name.clone());
         let welcome =
             match timeout(HANDSHAKE_TIMEOUT, ferry_net::initiate(&mut framed, hello)).await {
@@ -566,6 +596,9 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
                 }
                 Ok(Ok(welcome)) => welcome,
             };
+        if self.secure_input && !welcome.capabilities.contains(Capabilities::SECURE_INPUT) {
+            return Err(Error::Protocol("控制端不支持已启用的安全输入证明"));
+        }
         report(None);
         // 记下这次连上的地址：以后局域网里找不到它时用。记不下来只是少一个兜底。
         if let Err(e) = crate::server::remember_addr(&config.store, server, addr) {
@@ -573,6 +606,9 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
         }
         let mut screens = displays.displays()?;
         send(&mut framed, &Message::Displays(screens.clone())).await?;
+        if let Some(nonce) = challenge {
+            send(&mut framed, &Message::SecureChallenge { nonce }).await?;
+        }
         if welcome.capabilities.contains(Capabilities::APP_INFO) {
             send(&mut framed, &crate::link::app_info()).await?;
         }
@@ -613,21 +649,10 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
             session: welcome.session,
             server,
         };
-        let _data_task = if clipboard || files {
-            match link.connect(Channel::Data).await {
-                Ok(data) => {
-                    info!("数据连接已建立");
-                    let files = files.then(|| config.files.attach(server, Some(link.opener())));
-                    Some(self.start_data(data, server, clipboard, files))
-                }
-                Err(e) => {
-                    warn!("数据连接失败，本次不同步剪贴板、不能传文件：{e}");
-                    None
-                }
-            }
-        } else {
-            None
-        };
+        // 建立数据连接不能阻塞输入循环；安全输入的签署保活也走输入连接。
+        let mut data_pending = clipboard || files;
+        let mut data_connection = std::pin::pin!(link.connect(Channel::Data));
+        let mut _data_task = None;
 
         // 自己定时 Ping 服务端测往返延迟；同时据最后一次收到消息的时刻判断断线。
         let epoch = Instant::now();
@@ -638,10 +663,25 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
         silence.set_missed_tick_behavior(MissedTickBehavior::Skip);
         let mut screen_check = interval(DISPLAY_CHECK);
         screen_check.set_missed_tick_behavior(MissedTickBehavior::Skip);
+        let mut input_reported = Instant::now();
+        let mut applied_inputs = 0_u64;
+        let mut slowest_injection = Duration::ZERO;
         let mut hints = self.edge.hints();
         hints.mark_unchanged();
         loop {
             let message = tokio::select! {
+                data = &mut data_connection, if data_pending => {
+                    data_pending = false;
+                    match data {
+                        Ok(data) => {
+                            info!("数据连接已建立");
+                            let files = files.then(|| config.files.attach(server, Some(link.opener())));
+                            _data_task = Some(self.start_data(data, server, clipboard, files));
+                        }
+                        Err(e) => warn!("数据连接失败，本次不同步剪贴板、不能传文件：{e}"),
+                    }
+                    continue;
+                }
                 message = framed.recv() => message?,
                 Some(command) = next_command(&mut self.commands) => {
                     match command {
@@ -691,11 +731,31 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
                     continue;
                 }
                 _ = ping.tick() => {
+                    if input_reported.elapsed() >= Duration::from_secs(5) {
+                        debug!(
+                            applied_inputs,
+                            slowest_injection_ms = slowest_injection.as_secs_f64() * 1000.0,
+                            cursor_here = *self.active.borrow(),
+                            "输入注入统计（过去 5 秒）"
+                        );
+                        applied_inputs = 0;
+                        slowest_injection = Duration::ZERO;
+                        input_reported = Instant::now();
+                    }
                     let nonce = epoch.elapsed().as_micros() as u64;
                     send(&mut framed, &Message::Ping { nonce }).await?;
                     continue;
                 }
                 _ = silence.tick() => {
+                    // 即使光标在控制端，也给特权输入代理保活；没有输入时仍能发现服务故障。
+                    self.inject.check_available()?;
+                    if self.secure_input {
+                        let next = self.inject.remote_challenge(*server.as_bytes())?.ok_or(Error::Protocol("安全输入授权丢失"))?;
+                        if challenge != Some(next) {
+                            send(&mut framed, &Message::SecureChallenge { nonce: next }).await?;
+                            challenge = Some(next);
+                        }
+                    }
                     if last_heard.elapsed() > SILENCE_TIMEOUT {
                         return Err(Error::HeartbeatTimeout);
                     }
@@ -703,6 +763,27 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
                 }
             };
             last_heard = Instant::now();
+            let mut verified_injection = None;
+            let message = match message {
+                Some(Message::SecureInput(proof)) if self.secure_input => {
+                    let action = SecureAction::decode(&proof.body)
+                        .map_err(|_| Error::Protocol("签署输入正文无效"))?;
+                    let started = Instant::now();
+                    self.inject.inject_verified(&proof)?;
+                    verified_injection = Some(started.elapsed());
+                    match action.message() {
+                        Some(message) => Some(message),
+                        None => continue,
+                    }
+                }
+                Some(ref message)
+                    if self.secure_input && SecureAction::from_message(message).is_some() =>
+                {
+                    return Err(Error::Protocol("安全输入会话收到未签署动作"));
+                }
+                Some(Message::SecureInput(_)) => return Err(Error::Protocol("未协商安全输入证明")),
+                other => other,
+            };
             match message {
                 None | Some(Message::Bye(_)) => return Ok(Ended::Session),
                 Some(Message::Ping { nonce }) => {
@@ -719,11 +800,15 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
                     }
                 }
                 Some(Message::Enter(enter)) => {
+                    self.inject.check_available()?;
+                    self.release_all()?;
                     // 先把光标移到入口再显示，免得它先在藏身处闪一下。
-                    self.move_to(enter.position);
+                    self.move_to(enter.position)?;
                     self.hide_cursor(false);
                     // 只同步 Caps Lock：对方可能没有 Num Lock（例如 Mac），同步它会误关本机的小键盘。
-                    if let Err(e) = self.inject.sync_locks(enter.locks, LockKeys::CAPS) {
+                    if !self.secure_input
+                        && let Err(e) = self.inject.sync_locks(enter.locks, LockKeys::CAPS)
+                    {
                         warn!("同步锁定键失败：{e}");
                     }
                     self.active.send_replace(true);
@@ -736,7 +821,7 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
                     });
                 }
                 Some(Message::Leave { .. }) => {
-                    self.release_all();
+                    self.release_all()?;
                     self.hide_cursor(true);
                     self.active.send_replace(false);
                     self.edge.pointer(|p| p.here = false);
@@ -747,7 +832,13 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
                         peer: server,
                     });
                 }
-                Some(Message::Input(event)) => self.apply(event),
+                Some(Message::Input(event)) => {
+                    let started = Instant::now();
+                    self.apply(event)?;
+                    applied_inputs += 1;
+                    slowest_injection = slowest_injection
+                        .max(verified_injection.unwrap_or_else(|| started.elapsed()));
+                }
                 Some(Message::PeerSide { side }) => {
                     info!(?side, "服务端在本机的这一侧");
                     self.publish_edge(side, &screens, &shown);
@@ -849,30 +940,33 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
         )
     }
 
-    fn apply(&mut self, event: InputEvent) {
+    fn apply(&mut self, event: InputEvent) -> Result<()> {
         match event {
             InputEvent::PointerMotion { position } => return self.move_to(position),
             // 先把光标放到事件发生的位置，再执行按键或滚动。
             InputEvent::Button { position, .. } | InputEvent::Wheel { position, .. }
                 if position != self.cursor =>
             {
-                self.move_to(position);
+                self.move_to(position)?;
             }
             _ => {}
         }
+        // 只有执行成功后才更新状态；松开失败时保留原记录，恢复后仍能补发释放。
+        self.inject(&event)?;
         self.pressed.track(&event);
         let held = self.pressed.any_button();
         self.edge.pointer(|p| p.held = held);
-        self.inject(&event);
+        Ok(())
     }
 
-    fn move_to(&mut self, position: Point) {
+    fn move_to(&mut self, position: Point) -> Result<()> {
+        self.inject(&InputEvent::PointerMotion { position })?;
         self.cursor = position;
-        self.inject(&InputEvent::PointerMotion { position });
         self.edge.pointer(|p| {
             p.x = position.x as f32;
             p.y = position.y as f32;
         });
+        Ok(())
     }
 
     /// 告诉边缘投递：朝向服务端的是哪条边、本机屏幕多大。本机对它关掉了拖文件时不摆这条边。
@@ -896,27 +990,51 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
 
     /// 光标在服务端屏幕上时隐藏本机光标，回到本机时重新显示。失败只影响显示，不影响控制。
     fn hide_cursor(&mut self, hidden: bool) {
-        if self.cursor_hidden == hidden {
+        if self.secure_input {
+            self.cursor_hidden = None;
             return;
         }
-        self.cursor_hidden = hidden;
-        if let Err(e) = self.inject.set_cursor_hidden(hidden) {
-            debug!("{}本机光标失败：{e}", if hidden { "隐藏" } else { "显示" });
+        if self.cursor_hidden == Some(hidden) {
+            return;
+        }
+        // 超时不等于未执行：例如 Windows 的隐藏窗口可能稍后才处理消息。
+        // 失败时保留“不确定”，保证相同请求会重试，退出时也会恢复显示。
+        self.cursor_hidden = None;
+        match self.inject.set_cursor_hidden(hidden) {
+            Ok(()) => self.cursor_hidden = Some(hidden),
+            Err(e) => debug!("{}本机光标失败：{e}", if hidden { "隐藏" } else { "显示" }),
         }
     }
 
-    fn release_all(&mut self) {
-        for event in self.pressed.release_all(self.cursor) {
-            self.inject(&event);
+    fn release_all(&mut self) -> Result<()> {
+        let mut first_error = None;
+        for event in self.pressed.clone().release_all(self.cursor) {
+            match self.inject(&event) {
+                Ok(()) => self.pressed.track(&event),
+                Err(e) => {
+                    first_error.get_or_insert(e);
+                }
+            }
         }
-        self.edge.pointer(|p| p.held = false);
+        let held = self.pressed.any_button();
+        self.edge.pointer(|p| p.held = held);
+        match first_error {
+            Some(e) => Err(e),
+            None => Ok(()),
+        }
     }
 
-    fn inject(&mut self, event: &InputEvent) {
+    fn inject(&mut self, event: &InputEvent) -> Result<()> {
+        if self.secure_input {
+            return Ok(());
+        }
         match self.inject.inject(event) {
-            Ok(()) => {}
-            Err(e @ PlatformError::Unsupported(_)) => debug!("跳过：{e}"),
-            Err(e) => warn!(?event, "注入失败：{e}"),
+            Ok(()) => Ok(()),
+            Err(e @ PlatformError::Unsupported(_)) => {
+                debug!("跳过：{e}");
+                Ok(())
+            }
+            Err(e) => Err(e.into()),
         }
     }
 }

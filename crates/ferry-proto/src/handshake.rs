@@ -12,7 +12,7 @@ use crate::limits::MAX_NAME_LEN;
 use crate::wire::{Body, Reader, Writer};
 
 /// 当前协议版本。线上格式有任何不兼容的变化都必须递增。
-pub const PROTOCOL_VERSION: u16 = 1;
+pub const PROTOCOL_VERSION: u16 = 2;
 
 /// 连接类型。每对设备之间各有一条。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -63,6 +63,8 @@ bitflags! {
         const REMOTE_SETTINGS = 1 << 5;
         /// 握手后互相告诉程序版本（`AppInfo` 消息）。
         const APP_INFO = 1 << 6;
+        /// 代理独立验证由控制端设备私钥签署的输入。
+        const SECURE_INPUT = 1 << 7;
     }
 }
 

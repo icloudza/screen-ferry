@@ -27,7 +27,7 @@ fn enter(n: &mut Neighbors, position: Point, dx: i32) -> (u64, Point) {
 }
 
 fn leave(n: &mut Neighbors, dx: i32) -> (u64, Point) {
-    match n.remote_motion(dx, 0, true) {
+    match n.remote_motion(dx, 0, true, Instant::now()) {
         Some((id, Transition::Leave { local_at, .. })) => (id, local_at),
         other => panic!("应回到本机，实际 {other:?}"),
     }
@@ -148,6 +148,38 @@ fn each_neighbor_has_its_own_delay() {
 }
 
 #[test]
+fn the_active_neighbors_delay_applies_when_returning_too() {
+    use std::time::Duration;
+
+    let mut n = three();
+    n.set_delay(1, Duration::from_millis(500));
+    let t0 = Instant::now();
+    let at = |ms| t0 + Duration::from_millis(ms);
+    let edge = Point::new(999, 100);
+    assert_eq!(n.local_motion(edge, 1, 0, at(0)), None);
+    assert!(matches!(
+        n.local_motion(edge, 1, 0, at(500)),
+        Some((1, Transition::Enter { .. }))
+    ));
+    assert!(matches!(
+        n.remote_motion(-50, 0, true, at(1000)),
+        Some((1, Transition::Move(_)))
+    ));
+    assert_eq!(n.remote_motion(-1, 0, true, at(1499)), None);
+    assert_eq!(n.active(), Some(1));
+    n.reset_wait();
+    assert_eq!(n.remote_motion(-1, 0, true, at(1500)), None);
+    assert!(matches!(
+        n.remote_motion(-1, 0, true, at(2000)),
+        Some((1, Transition::Leave { .. }))
+    ));
+    assert_eq!(n.active(), None);
+    // B 没设延迟，进出仍然立即生效。
+    enter(&mut n, Point::new(999, 600), 1);
+    leave(&mut n, -50);
+}
+
+#[test]
 fn sliding_along_the_edge_to_another_part_starts_the_wait_over() {
     use std::time::Duration;
 
@@ -172,13 +204,13 @@ fn each_neighbor_has_its_own_pointer_speed() {
     n.set_speed(1, 2, 1);
     let (_, at) = enter(&mut n, Point::new(999, 100), 4);
     assert_eq!(
-        n.remote_motion(10, 0, true),
+        n.remote_motion(10, 0, true, Instant::now()),
         Some((1, Transition::Move(Point::new(at.x + 20, at.y))))
     );
     leave(&mut n, -5000);
     let (_, at) = enter(&mut n, Point::new(999, 600), 4);
     assert_eq!(
-        n.remote_motion(10, 0, true),
+        n.remote_motion(10, 0, true, Instant::now()),
         Some((2, Transition::Move(Point::new(at.x + 10, at.y)))),
         "B 没改速度"
     );

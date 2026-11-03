@@ -9,6 +9,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod input_agent;
 pub mod limits;
 
 mod clipboard;
@@ -19,6 +20,7 @@ mod file;
 mod handshake;
 mod message;
 mod screen;
+mod secure_input;
 mod transfer;
 mod wire;
 
@@ -32,4 +34,5 @@ pub use handshake::{
 };
 pub use message::Message;
 pub use screen::Enter;
+pub use secure_input::SecureAction;
 pub use transfer::{Cancel, CancelReason, Chunk};

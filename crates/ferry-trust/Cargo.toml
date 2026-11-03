@@ -9,6 +9,10 @@ publish.workspace = true
 [lib]
 test = false
 
+[[bench]]
+name = "input_proof"
+harness = false
+
 [dependencies]
 ferry-types.workspace = true
 rcgen.workspace = true

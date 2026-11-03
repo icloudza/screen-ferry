@@ -44,7 +44,7 @@ pub struct EdgeSwitch {
     speed: (i64, i64),
     /// 光标要在边上停这么久才切过去。
     delay: Duration,
-    /// 光标贴上朝向远端那条边的时刻；不在边上时为 `None`。
+    /// 光标贴上切换边缘的时刻；进出共用，切换后清空。
     arrived: Option<Instant>,
     seq: u32,
     remote_at: Option<Point>,
@@ -79,8 +79,11 @@ impl EdgeSwitch {
         }
     }
 
-    /// 光标要在朝向远端的边上停够 `delay` 才切过去。缺省为 0，推出去就切。
+    /// 进入远端和返回本机都要在切换边缘停够 `delay`。缺省为 0，推出去就切。
     pub fn set_delay(&mut self, delay: Duration) {
+        if self.delay != delay {
+            self.arrived = None;
+        }
         self.delay = delay;
     }
 
@@ -100,12 +103,18 @@ impl EdgeSwitch {
 
     /// 本机的显示器布局变了（改分辨率、插拔显示器）。之后的进出都按新的范围判断。
     pub fn set_local(&mut self, local: Rect, scale_percent: u16) {
+        if self.local != local {
+            self.arrived = None;
+        }
         self.local = local;
         self.scale_percent = i64::from(scale_percent);
     }
 
     /// 远端的显示器布局变了。光标在远端时会被收进新的范围内。
     pub fn set_remote(&mut self, remote: Rect, scale_percent: u16) {
+        if self.remote != remote {
+            self.arrived = None;
+        }
         self.remote = remote;
         self.scale_percent = i64::from(scale_percent);
         if let Some(at) = self.remote_at {
@@ -171,9 +180,19 @@ impl EdgeSwitch {
 
     /// 光标在远端时的一次相对移动。
     ///
-    /// `can_leave` 为假时（例如还按着鼠标键）光标停在边缘，不回本机。
-    pub fn remote_motion(&mut self, dx: i32, dy: i32, can_leave: bool) -> Option<Transition> {
+    /// `can_leave` 为假时（例如还按着鼠标键）光标停在边缘，不回本机，也不累计停留时间。
+    /// `now` 是这次移动的时刻；在返回边缘停够延迟后，再往外推才回本机。
+    pub fn remote_motion(
+        &mut self,
+        dx: i32,
+        dy: i32,
+        can_leave: bool,
+        now: Instant,
+    ) -> Option<Transition> {
         let at = self.remote_at?;
+        if !can_leave {
+            self.arrived = None;
+        }
         let (sx, sy) = self.scale(dx, dy);
         if sx == 0 && sy == 0 {
             return None;
@@ -192,7 +211,21 @@ impl EdgeSwitch {
             Side::Bottom => i64::from(r.y) - y,
             Side::Top => y - i64::from(r.bottom() - 1),
         };
-        if can_leave && beyond > 0 {
+        let at_edge = match self.side {
+            Side::Right => next.x == r.x,
+            Side::Left => next.x == r.right() - 1,
+            Side::Bottom => next.y == r.y,
+            Side::Top => next.y == r.bottom() - 1,
+        };
+        let ready = if can_leave && at_edge {
+            let arrived = *self.arrived.get_or_insert(now);
+            now.saturating_duration_since(arrived) >= self.delay
+        } else {
+            self.arrived = None;
+            false
+        };
+        if ready && beyond > 0 {
+            self.arrived = None;
             self.remote_at = None;
             let depth = (self.to_local(beyond) - 1).max(INSET);
             return Some(Transition::Leave {
@@ -234,6 +267,7 @@ impl EdgeSwitch {
 
     /// 连接中断等情况下立即回到本机。光标原本在远端时，返回本机光标应放到的位置。
     pub fn abort(&mut self) -> Option<Point> {
+        self.arrived = None;
         let at = self.remote_at.take()?;
         Some(self.local_point(at, INSET))
     }

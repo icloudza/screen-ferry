@@ -18,7 +18,8 @@ pub(crate) fn capabilities(clipboard: bool, command_key: bool) -> Capabilities {
     let mut caps = Capabilities::FILES
         | Capabilities::EDGE_DROP
         | Capabilities::REMOTE_SETTINGS
-        | Capabilities::APP_INFO;
+        | Capabilities::APP_INFO
+        | Capabilities::SECURE_INPUT;
     if clipboard {
         caps |= Capabilities::CLIPBOARD;
     }

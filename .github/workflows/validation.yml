@@ -1,0 +1,128 @@
+name: Validation Installers
+
+# 只生成 Actions 下载产物，不创建 tag、Release 或自动更新清单。
+on:
+  push:
+    branches: [codex/uac-validation-artifacts]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validation-installers-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  windows:
+    name: Windows x64 安装包（UAC 可选）
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装 Rust 工具链
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.47.8
+          channel: stable
+      - name: 安装 Inno Setup 7.1.1
+        shell: pwsh
+        run: |
+          $installer = Join-Path $env:RUNNER_TEMP 'innosetup-7.1.1-x64.exe'
+          $dir = Join-Path $env:RUNNER_TEMP 'InnoSetup'
+          Invoke-WebRequest 'https://github.com/jrsoftware/issrc/releases/download/is-7_1_1/innosetup-7.1.1-x64.exe' -OutFile $installer
+          $hash = (Get-FileHash $installer -Algorithm SHA256).Hash
+          if ($hash -ne '8a5a6711c3766a6e5fb74f280ba0e3551e719ce94538d901fdbd1f8f9920b3f0') { throw "Inno Setup 校验和不匹配：$hash" }
+          Start-Process $installer -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', "/DIR=$dir" -Wait
+          "ISCC=$(Join-Path $dir 'ISCC.exe')" >> $env:GITHUB_ENV
+      - name: 构建完整 release 安装包
+        run: cargo xtask bundle --experimental-secure-input
+      - name: 放入验收说明
+        run: Copy-Item docs/actions-validation.md target/bundle/windows/README.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ScreenFerry-windows-x64-validation-${{ github.sha }}
+          path: |
+            target/bundle/windows/*-setup.exe
+            target/bundle/windows/README.md
+          retention-days: 14
+          if-no-files-found: error
+
+  macos:
+    name: macOS 通用安装包（签名与公证）
+    runs-on: macos-latest
+    timeout-minutes: 90
+    env:
+      MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+      MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+      NOTARY_KEY: ${{ secrets.NOTARY_KEY }}
+      NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+      NOTARY_ISSUER: ${{ secrets.NOTARY_ISSUER }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: 检查签名和公证配置
+        shell: bash
+        run: |
+          if [ -z "$MACOS_CERTIFICATE" ] || [ -z "$NOTARY_KEY" ] || [ -z "$NOTARY_KEY_ID" ] || [ -z "$NOTARY_ISSUER" ]; then
+            echo "::error::缺少 macOS 签名或公证密钥，不能生成本次验收安装包"
+            exit 1
+          fi
+      - name: 安装 Rust 工具链和两个目标
+        run: |
+          rustup show active-toolchain || rustup toolchain install
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.47.8
+          channel: stable
+      - name: 安装 dmgbuild
+        run: |
+          python3 -m venv "$RUNNER_TEMP/dmgbuild"
+          "$RUNNER_TEMP/dmgbuild/bin/pip" install --quiet dmgbuild==1.6.5
+          echo "SCREENFERRY_DMGBUILD=$RUNNER_TEMP/dmgbuild/bin/dmgbuild" >> "$GITHUB_ENV"
+      - name: 导入 Developer ID 证书
+        run: |
+          validation_keychain="$RUNNER_TEMP/validation.keychain-db"
+          validation_password="$(uuidgen)"
+          echo "::add-mask::$validation_password"
+          echo "$MACOS_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/validation-certificate.p12"
+          security create-keychain -p "$validation_password" "$validation_keychain"
+          security set-keychain-settings -lut 21600 "$validation_keychain"
+          security unlock-keychain -p "$validation_password" "$validation_keychain"
+          security import "$RUNNER_TEMP/validation-certificate.p12" -P "$MACOS_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$validation_keychain"
+          security set-key-partition-list -S apple-tool:,apple: -k "$validation_password" "$validation_keychain"
+          validation_keychains=("$validation_keychain")
+          while read -r validation_existing_keychain; do
+            validation_keychains+=("${validation_existing_keychain//\"/}")
+          done < <(security list-keychains -d user)
+          security list-keychains -d user -s "${validation_keychains[@]}"
+          rm "$RUNNER_TEMP/validation-certificate.p12"
+      - name: 构建、签名和公证通用应用及安装盘
+        run: |
+          echo "$NOTARY_KEY" | base64 --decode > "$RUNNER_TEMP/validation-notary.p8"
+          SCREENFERRY_NOTARY_KEY="$RUNNER_TEMP/validation-notary.p8" \
+          SCREENFERRY_NOTARY_KEY_ID="$NOTARY_KEY_ID" \
+          SCREENFERRY_NOTARY_ISSUER="$NOTARY_ISSUER" \
+            cargo xtask bundle --universal --notarize --dmg
+      - name: 清理临时签名材料
+        if: always()
+        run: |
+          rm -f "$RUNNER_TEMP/validation-notary.p8" "$RUNNER_TEMP/validation-certificate.p12"
+          if [ -f "$RUNNER_TEMP/validation.keychain-db" ]; then
+            security delete-keychain "$RUNNER_TEMP/validation.keychain-db"
+          fi
+      - name: 放入验收说明
+        run: cp docs/actions-validation.md target/bundle/macos/README.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ScreenFerry-macos-universal-validation-${{ github.sha }}
+          path: |
+            target/bundle/macos/*-macos-universal.dmg
+            target/bundle/macos/*-macos-universal.zip
+            target/bundle/macos/README.md
+          retention-days: 14
+          if-no-files-found: error

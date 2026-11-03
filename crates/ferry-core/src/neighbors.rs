@@ -118,10 +118,17 @@ impl Neighbors {
         }
     }
 
-    /// 光标要在朝向这台邻居的那一段边上停够 `delay` 才切过去。
+    /// 进入这台邻居和从它返回本机，都要在切换边缘停够 `delay`。
     pub fn set_delay(&mut self, id: u64, delay: Duration) {
         if let Some(neighbor) = self.find_mut(id) {
             neighbor.switch.set_delay(delay);
+        }
+    }
+
+    /// 按下或松开鼠标键后重新计算停留时间，拖动期间的等待不带到松开之后。
+    pub fn reset_wait(&mut self) {
+        for neighbor in &mut self.list {
+            neighbor.switch.left_edge();
         }
     }
 
@@ -161,9 +168,13 @@ impl Neighbors {
         dx: i32,
         dy: i32,
         can_leave: bool,
+        now: Instant,
     ) -> Option<(u64, Transition)> {
         let id = self.active?;
-        let t = self.find_mut(id)?.switch.remote_motion(dx, dy, can_leave)?;
+        let t = self
+            .find_mut(id)?
+            .switch
+            .remote_motion(dx, dy, can_leave, now)?;
         if matches!(t, Transition::Leave { .. }) {
             self.active = None;
         }

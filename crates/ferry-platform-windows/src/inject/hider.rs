@@ -14,6 +14,8 @@ use std::thread;
 use ferry_platform::{Error, Result};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::System::StationsAndDesktops::{GetThreadDesktop, HDESK, SetThreadDesktop};
+use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateCursor, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetCursorPos,
     GetMessageW, GetSystemMetrics, HWND_TOPMOST, KillTimer, MSG, PostMessageW, PostQuitMessage,
@@ -49,10 +51,20 @@ pub(crate) struct CursorHider {
 
 impl CursorHider {
     pub(crate) fn start() -> Result<Self> {
+        // SAFETY: 借用创建方线程的桌面。创建方在 hider 存活期间保留自己的桌面绑定。
+        // 新线程先显式绑定，不能依赖进程的 Default 桌面；安全输入工作线程可能在 Winlogon 上。
+        let desktop = unsafe { GetThreadDesktop(GetCurrentThreadId()) }
+            .map_err(|e| os("GetThreadDesktop", e))?
+            .0 as isize;
         let (tx, rx) = mpsc::channel();
         thread::Builder::new()
             .name("ferry-cursor".into())
             .spawn(move || {
+                // SAFETY: 本线程尚未创建窗口或钩子，借用创建方仍存活的桌面句柄。
+                if let Err(e) = unsafe { SetThreadDesktop(HDESK(desktop as *mut _)) } {
+                    let _ = tx.send(Err(os("SetThreadDesktop", e)));
+                    return;
+                }
                 let hwnd = match create_window() {
                     Ok(hwnd) => hwnd,
                     Err(e) => {

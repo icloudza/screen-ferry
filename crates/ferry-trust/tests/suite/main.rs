@@ -4,5 +4,6 @@
 
 mod fingerprint;
 mod identity;
+mod input_proof;
 mod pairing;
 mod peers;

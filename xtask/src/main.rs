@@ -5,6 +5,7 @@
 mod bundle;
 mod deps;
 mod icons;
+mod input_validation;
 mod layout;
 mod release;
 mod workspace;
@@ -20,6 +21,7 @@ const USAGE: &str = "\
   bundle [--universal] [--notarize]
           macOS 上可以打通用版、交给 Apple 公证；也会生成更新包 ScreenFerry-<版本>-macos.zip
   icons   从 assets/icons/ 的 SVG 导出托盘图标和两个系统的应用图标（需要 rsvg-convert）
+  input-validation [--target <Windows目标>]  构建实验安全输入 CLI 验收包，不安装或启动
   release <版本>   改版本号、整理更新日志，提交并打 tag（推送后 CI 构建发布草稿）
   manifest …       CI 用：按目录里的更新包写 update.json
   sign <文件>      CI 用：用发布私钥签名，写出 <文件>.minisig
@@ -42,6 +44,15 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
+        Some("input-validation") => {
+            match input_validation::run(&std::env::args().skip(2).collect::<Vec<_>>()) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(e) => {
+                    eprintln!("验收包构建失败：{e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
         Some(cmd @ ("release" | "manifest" | "sign" | "update-keygen")) => {
             let args: Vec<String> = std::env::args().skip(2).collect();
             let result = match cmd {

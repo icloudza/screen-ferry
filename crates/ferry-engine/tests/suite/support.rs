@@ -80,6 +80,7 @@ pub struct Setup {
     pub mac_confirm: AutoConfirm,
     pub pc_confirm: AutoConfirm,
     pub start_client: bool,
+    pub pc_inject: Option<MockInject>,
     /// 服务端在局域网广播、客户端不填地址自己找。需要本机网络支持组播。
     pub discover: bool,
     /// 服务端可随时修改的设置；`None` 为固定的“右侧、互换 ⌘ 与 Ctrl”。
@@ -111,6 +112,7 @@ impl Default for Setup {
             mac_confirm: AutoConfirm::answering(true),
             pc_confirm: AutoConfirm::answering(true),
             start_client: true,
+            pc_inject: None,
             discover: false,
             live: None,
             mac_events: Events::none(),
@@ -188,7 +190,7 @@ impl Rig {
         let listener = TcpListener::bind(bind).await.unwrap();
         let addr = listener.local_addr().unwrap();
         let capture = MockCapture::new();
-        let inject = MockInject::new();
+        let inject = setup.pc_inject.clone().unwrap_or_default();
         let mac_displays = MockDisplays::new(vec![display(1000, 800, 100)]);
         let pc_displays = MockDisplays::new(vec![display(1920, 1080, 150)]);
         let mac_files = setup

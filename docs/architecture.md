@@ -8,6 +8,8 @@
 |---|---|---|---|
 | 后台 | `screenferry` | 常驻 | 键鼠捕获与注入、网络、同步、托盘 |
 | 设置界面 | Flutter 程序（`app/`） | 按需启动，关闭即退出 | 状态、设备与配对、布局、日志、设置 |
+| Windows 安全输入服务 | `screenferry-service run` | 安装时可选，SCM 管理 | 管理当前控制台会话的输入代理，无网络或配置接口 |
+| Windows 输入代理 | `screenferry-service agent` | 服务创建，Job 管理 | SYSTEM 身份按输入桌面分线程注入键鼠，断联释放 |
 
 设置界面直接连接后台：后台监听 `127.0.0.1` 的随机端口，把端口和令牌写进缓存目录的 `ipc.json`，
 界面读取后连接，每行一条 JSON（协议见 [ipc.md](ipc.md)，决策见 ADR 0004）。
@@ -21,6 +23,14 @@ tokio 运行时里；托盘需要更新时，经 `ferry-platform` 的 `EventLoop
 后台不带参数时常驻运行（`ferry-engine` 的 `resident` 模块）：读 `config.toml` 启动引擎，
 暂停共享即停止引擎，改了需要重新握手的设置就重启引擎，屏幕方向等设置即时生效；
 首次配对的配对码在设置界面上核对。
+
+实验构建启用安全输入时，Windows 的 `InputInject` 实现通过受限的本机命名管道连接代理，双方校验内核报告的进程身份、会话及
+固定安装映像。代理在 Default/Winlogon 桌面之间选择工作线程，不重启网络连接。定长协议在 `ferry-proto::input_agent`，
+序号和租约在 `ferry-core::InputLease`；Windows API 全部位于 `ferry-platform-windows/src/inject/`。
+服务复制自身令牌进入用户会话，不继承任何句柄；代理核验父服务后只复制停止事件的等待权限，并移除不必要的令牌特权。
+见 [ADR 0015](adr/0015-windows-secure-input-service.md) 与 [实机验收](input-troubleshooting.md)。
+来源认证见 [ADR 0016](adr/0016-authenticate-secure-input-origin.md)：控制端签署完整输入，代理核验管理员授权、短时挑战及连续序号；普通后台只转发。
+授权位于 Windows 受保护的 HKLM 策略，按用户 SID 隔离，普通配对不能授予 UAC 权限。正式构建保持关闭，等待安全复查及 Windows 实机验收。
 
 ## 网络连接
 
@@ -45,6 +55,9 @@ graph BT
   platform[ferry-platform] --> types
   update[ferry-update]
   win[ferry-platform-windows] --> platform
+  win --> proto
+  win --> trust
+  mock --> trust
   mac[ferry-platform-macos] --> platform
   mock[ferry-platform-mock] --> platform
   net[ferry-net] --> proto
@@ -60,6 +73,7 @@ graph BT
   daemon[ferry-daemon · L4] --> engine
   daemon -.按平台注入.-> win
   daemon -.按平台注入.-> mac
+  service[ferry-service · L4] --> win
   app[设置界面 app/ · Flutter] -.本机回环 TCP.-> ipc
 ```
 

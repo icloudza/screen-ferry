@@ -92,20 +92,20 @@ fn moves_inside_remote_and_stops_at_its_far_edges() {
     enter(&mut s, Point::new(999, 400), 1, 0);
 
     assert_eq!(
-        s.remote_motion(30, -40, true),
+        s.remote_motion(30, -40, true, Instant::now()),
         Some(Transition::Move(Point::new(31, 500)))
     );
     assert_eq!(
-        s.remote_motion(5000, 0, true),
+        s.remote_motion(5000, 0, true, Instant::now()),
         Some(Transition::Move(Point::new(1919, 500)))
     );
     assert_eq!(
-        s.remote_motion(10, 0, true),
+        s.remote_motion(10, 0, true, Instant::now()),
         None,
         "已顶到远端右边，没有变化"
     );
     assert_eq!(
-        s.remote_motion(0, -9000, true),
+        s.remote_motion(0, -9000, true, Instant::now()),
         Some(Transition::Move(Point::new(1919, 0)))
     );
     assert_eq!(s.remote_position(), Some(Point::new(1919, 0)));
@@ -115,10 +115,10 @@ fn moves_inside_remote_and_stops_at_its_far_edges() {
 fn leaves_through_the_edge_facing_local() {
     let mut s = switch(Side::Right);
     enter(&mut s, Point::new(999, 400), 1, 0);
-    s.remote_motion(10, 0, true);
+    s.remote_motion(10, 0, true, Instant::now());
 
     assert_eq!(
-        s.remote_motion(-12, 0, true),
+        s.remote_motion(-12, 0, true, Instant::now()),
         Some(Transition::Leave {
             seq: 1,
             local_at: Point::new(998, 400)
@@ -130,7 +130,7 @@ fn leaves_through_the_edge_facing_local() {
     let at = enter(&mut s, Point::new(999, 0), 1, 0);
     assert_eq!(at, Point::new(1, 0));
     assert!(matches!(
-        s.remote_motion(-2, 0, true),
+        s.remote_motion(-2, 0, true, Instant::now()),
         Some(Transition::Leave { seq: 2, .. })
     ));
 }
@@ -140,14 +140,18 @@ fn holding_a_button_keeps_the_cursor_on_remote() {
     let mut s = switch(Side::Right);
     enter(&mut s, Point::new(999, 400), 1, 0);
     assert_eq!(
-        s.remote_motion(-50, 0, false),
+        s.remote_motion(-50, 0, false, Instant::now()),
         Some(Transition::Move(Point::new(0, 540))),
         "顶到边缘为止"
     );
-    assert_eq!(s.remote_motion(-50, 0, false), None, "停在边缘，位置不变");
+    assert_eq!(
+        s.remote_motion(-50, 0, false, Instant::now()),
+        None,
+        "停在边缘，位置不变"
+    );
     assert!(s.is_remote());
     assert!(matches!(
-        s.remote_motion(-1, 0, true),
+        s.remote_motion(-1, 0, true, Instant::now()),
         Some(Transition::Leave { .. })
     ));
 }
@@ -163,16 +167,16 @@ fn scales_motion_and_carries_the_remainder() {
     enter(&mut s, Point::new(999, 0), 1, 0);
 
     assert_eq!(
-        s.remote_motion(10, 0, true),
+        s.remote_motion(10, 0, true, Instant::now()),
         Some(Transition::Move(Point::new(16, 0)))
     );
     assert_eq!(
-        s.remote_motion(1, 0, true),
+        s.remote_motion(1, 0, true, Instant::now()),
         Some(Transition::Move(Point::new(17, 0))),
         "1.5 → 1，余 0.5"
     );
     assert_eq!(
-        s.remote_motion(1, 0, true),
+        s.remote_motion(1, 0, true, Instant::now()),
         Some(Transition::Move(Point::new(19, 0))),
         "1.5 + 0.5 → 2"
     );
@@ -186,14 +190,14 @@ fn abort_returns_control_to_local() {
     enter(&mut s, Point::new(999, 400), 1, 0);
     assert_eq!(s.abort(), Some(Point::new(998, 400)));
     assert!(!s.is_remote());
-    assert_eq!(s.remote_motion(5, 5, true), None);
+    assert_eq!(s.remote_motion(5, 5, true, Instant::now()), None);
 }
 
 #[test]
 fn remote_layout_change_clamps_the_cursor() {
     let mut s = switch(Side::Right);
     enter(&mut s, Point::new(999, 799), 1, 0);
-    s.remote_motion(1900, 0, true);
+    s.remote_motion(1900, 0, true, Instant::now());
 
     s.set_remote(Rect::new(0, 0, 1280, 720), 100);
     assert_eq!(s.remote_position(), Some(Point::new(1279, 719)));
@@ -260,11 +264,12 @@ fn a_one_unit_wobble_at_the_edge_does_not_bounce_back() {
     enter(&mut s, Point::new(999, 400), 1, 0);
 
     assert_eq!(
-        s.remote_motion(-1, 0, true),
+        s.remote_motion(-1, 0, true, Instant::now()),
         Some(Transition::Move(Point::new(0, 540))),
         "刚进来往回抖一下：仍在远端"
     );
-    let Some(Transition::Leave { local_at, .. }) = s.remote_motion(-1, 0, true) else {
+    let Some(Transition::Leave { local_at, .. }) = s.remote_motion(-1, 0, true, Instant::now())
+    else {
         panic!("再往回走就回到本机");
     };
     assert_eq!(local_at, Point::new(998, 400));
@@ -286,7 +291,7 @@ fn a_fast_crossing_carries_the_overshoot_to_the_other_side() {
         "越过边缘 30，到远端是第 30 个单位"
     );
     assert_eq!(
-        s.remote_motion(-50, 0, true),
+        s.remote_motion(-50, 0, true, Instant::now()),
         Some(Transition::Leave {
             seq: 1,
             local_at: Point::new(979, 400)
@@ -297,7 +302,7 @@ fn a_fast_crossing_carries_the_overshoot_to_the_other_side() {
     let mut s = switch(Side::Left);
     assert_eq!(enter(&mut s, Point::new(0, 0), -5000, 0), Point::new(0, 0));
     assert_eq!(
-        s.remote_motion(9000, 0, true),
+        s.remote_motion(9000, 0, true, Instant::now()),
         Some(Transition::Leave {
             seq: 1,
             local_at: Point::new(999, 0)
@@ -321,7 +326,7 @@ fn the_overshoot_is_scaled_between_the_two_sides() {
         "本机越过 20 → 远端 10"
     );
     assert_eq!(
-        s.remote_motion(-30, 0, true),
+        s.remote_motion(-30, 0, true, Instant::now()),
         Some(Transition::Leave {
             seq: 1,
             local_at: Point::new(988, 400)
@@ -365,7 +370,7 @@ fn pointer_speed_is_exact_to_one_dpi() {
     let start = s.remote_position().unwrap();
     // 8 × 2000 / 1600 = 10。
     assert_eq!(
-        s.remote_motion(8, 0, true),
+        s.remote_motion(8, 0, true, Instant::now()),
         Some(Transition::Move(Point::new(start.x + 10, start.y)))
     );
     // 每次 1 × 1.25：前三次各走 1，余下的累积起来，第四次多走 1。
@@ -373,7 +378,7 @@ fn pointer_speed_is_exact_to_one_dpi() {
     for expected in [1, 1, 1, 2] {
         x += expected;
         assert_eq!(
-            s.remote_motion(1, 0, true),
+            s.remote_motion(1, 0, true, Instant::now()),
             Some(Transition::Move(Point::new(x, start.y)))
         );
     }
@@ -385,9 +390,13 @@ fn a_slower_pointer_keeps_the_small_steps() {
     s.set_speed(800, 1600);
     enter(&mut s, Point::new(999, 400), 1, 0);
     let start = s.remote_position().unwrap();
-    assert_eq!(s.remote_motion(1, 0, true), None, "半个单位先攒着");
     assert_eq!(
-        s.remote_motion(1, 0, true),
+        s.remote_motion(1, 0, true, Instant::now()),
+        None,
+        "半个单位先攒着"
+    );
+    assert_eq!(
+        s.remote_motion(1, 0, true, Instant::now()),
         Some(Transition::Move(Point::new(start.x + 1, start.y)))
     );
 }
@@ -448,5 +457,130 @@ fn resting_on_the_edge_without_pushing_also_counts() {
     assert!(matches!(
         s.local_motion(Point::new(999, 403), 2, 0, at(300)),
         Some(Transition::Enter { .. })
+    ));
+}
+
+#[test]
+fn returning_waits_at_each_edge_and_still_requires_an_outward_push() {
+    use std::time::Duration;
+
+    for (side, edge, outward, tangent) in [
+        (Side::Right, Point::new(999, 400), (1, 0), (0, 1)),
+        (Side::Left, Point::new(0, 400), (-1, 0), (0, 1)),
+        (Side::Bottom, Point::new(500, 799), (0, 1), (1, 0)),
+        (Side::Top, Point::new(500, 0), (0, -1), (1, 0)),
+    ] {
+        let mut s = switch(side);
+        let t0 = Instant::now();
+        let at = |ms| t0 + Duration::from_millis(ms);
+        // 先进入，再启用延迟，只测返回方向。
+        assert!(matches!(
+            s.local_motion(edge, outward.0, outward.1, at(0)),
+            Some(Transition::Enter { .. })
+        ));
+        s.set_delay(Duration::from_millis(500));
+        let back = (-outward.0, -outward.1);
+        assert!(
+            matches!(
+                s.remote_motion(back.0, back.1, true, at(0)),
+                Some(Transition::Move(_))
+            ),
+            "{side:?}：刚抵达返回边缘"
+        );
+        assert_eq!(s.remote_motion(back.0, back.1, true, at(499)), None);
+        assert!(s.is_remote());
+        assert!(
+            matches!(
+                s.remote_motion(tangent.0, tangent.1, true, at(500)),
+                Some(Transition::Move(_))
+            ),
+            "沿边移动不切换"
+        );
+        assert!(
+            matches!(
+                s.remote_motion(back.0, back.1, true, at(500)),
+                Some(Transition::Leave { .. })
+            ),
+            "{side:?}：停够时间并向外推才返回"
+        );
+    }
+}
+
+#[test]
+fn leaving_the_return_edge_or_dragging_restarts_the_wait() {
+    use std::time::Duration;
+
+    let mut s = switch(Side::Right);
+    let t0 = Instant::now();
+    let at = |ms| t0 + Duration::from_millis(ms);
+    s.local_motion(Point::new(999, 400), 1, 0, at(0));
+    s.set_delay(Duration::from_millis(200));
+    s.remote_motion(-50, 0, true, at(0));
+    s.remote_motion(10, 0, true, at(150));
+    assert!(matches!(
+        s.remote_motion(-50, 0, true, at(300)),
+        Some(Transition::Move(_))
+    ));
+    assert_eq!(s.remote_motion(-1, 0, true, at(499)), None);
+    // 按住鼠标时即使没有可见位移也清空计时。
+    assert_eq!(s.remote_motion(0, 0, false, at(500)), None);
+    assert_eq!(s.remote_motion(-1, 0, true, at(900)), None);
+    assert_eq!(s.remote_motion(-1, 0, true, at(1099)), None);
+    assert!(matches!(
+        s.remote_motion(-1, 0, true, at(1100)),
+        Some(Transition::Leave { .. })
+    ));
+}
+
+#[test]
+fn forced_return_and_disconnect_clear_the_wait_without_delaying() {
+    use std::time::Duration;
+
+    for disconnected in [false, true] {
+        let mut s = switch(Side::Right);
+        let t0 = Instant::now();
+        let at = |ms| t0 + Duration::from_millis(ms);
+        s.local_motion(Point::new(999, 400), 1, 0, at(0));
+        s.set_delay(Duration::from_millis(500));
+        s.remote_motion(-50, 0, true, at(0));
+        if disconnected {
+            assert!(s.abort().is_some());
+        } else {
+            assert!(matches!(s.leave(), Some(Transition::Leave { .. })));
+        }
+        assert_eq!(s.local_motion(Point::new(999, 400), 1, 0, at(1000)), None);
+        assert!(matches!(
+            s.local_motion(Point::new(999, 400), 1, 0, at(1500)),
+            Some(Transition::Enter { .. })
+        ));
+        assert!(
+            matches!(
+                s.remote_motion(-50, 0, true, at(2000)),
+                Some(Transition::Move(_))
+            ),
+            "进入时的等待不能用于返回"
+        );
+        assert_eq!(s.remote_motion(-1, 0, true, at(2499)), None);
+    }
+}
+
+#[test]
+fn changing_delay_or_remote_geometry_restarts_the_return_wait() {
+    use std::time::Duration;
+
+    let mut s = switch(Side::Right);
+    let t0 = Instant::now();
+    let at = |ms| t0 + Duration::from_millis(ms);
+    s.local_motion(Point::new(999, 400), 1, 0, at(0));
+    s.set_delay(Duration::from_millis(200));
+    s.remote_motion(-50, 0, true, at(0));
+    s.set_delay(Duration::from_millis(300));
+    assert_eq!(s.remote_motion(-1, 0, true, at(400)), None);
+    s.set_remote(Rect::new(0, 0, 2000, 1200), 100);
+    assert_eq!(s.remote_motion(-1, 0, true, at(800)), None);
+    assert_eq!(s.remote_motion(-1, 0, true, at(1099)), None);
+    assert!(matches!(
+        s.remote_motion(-1, 0, true, at(1100)),
+        Some(Transition::Leave { .. })
     ));
 }

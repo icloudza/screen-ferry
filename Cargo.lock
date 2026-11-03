@@ -424,6 +424,7 @@ name = "ferry-platform-mock"
 version = "0.1.0"
 dependencies = [
  "ferry-platform",
+ "ferry-trust",
  "ferry-types",
 ]
 
@@ -433,6 +434,8 @@ version = "0.1.0"
 dependencies = [
  "ferry-core",
  "ferry-platform",
+ "ferry-proto",
+ "ferry-trust",
  "ferry-types",
  "windows",
  "windows-core",
@@ -446,6 +449,14 @@ dependencies = [
  "bitflags",
  "ferry-types",
  "thiserror",
+]
+
+[[package]]
+name = "ferry-service"
+version = "0.1.0"
+dependencies = [
+ "embed-resource",
+ "ferry-platform-windows",
 ]
 
 [[package]]

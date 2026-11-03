@@ -22,7 +22,11 @@ pub use capture::WinCapture;
 pub use clipboard::{WinClipboard, text_from_windows, text_to_windows};
 pub use display::WinDisplays;
 pub use event_loop::{WinEventLoop, allow_foreground, attach_console};
-pub use inject::WinInject;
+pub use inject::{
+    WinInject, authorize_input_peer, install_input_service, prepare_input_service,
+    remove_input_service, revoke_input_peer, run_input_agent, run_input_service,
+    stop_input_service,
+};
 pub use keymap::{WinKey, hid_from_windows, win_key};
 pub use overlay::WinOverlay;
 pub use permission::WinPermissions;

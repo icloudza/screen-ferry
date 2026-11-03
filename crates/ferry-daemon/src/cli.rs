@@ -13,6 +13,7 @@ pub(crate) const USAGE: &str = "\
   screenferry connect [服务端地址] [通用选项]
   screenferry peers   [--data-dir 目录]
   screenferry forget  <设备名或指纹> [--data-dir 目录]
+  screenferry input-key [--data-dir 目录]
   screenferry send    <文件或文件夹>... [--data-dir 目录]
   screenferry quit    [--data-dir 目录]
 
@@ -26,6 +27,7 @@ pub(crate) const USAGE: &str = "\
              不填地址时在局域网里自动寻找：优先已配对的；从未配对过时，只有一台才自动连
   peers      列出已配对的设备
   forget     删除一台已配对的设备，下次连接需要重新配对
+  input-key  输出本机的公开安全输入授权码，供被控端管理员通过可信渠道核对并授权
   send       请正在运行的 ScreenFerry 把文件或文件夹发给它连着的电脑，
              对方收到后放在“下载”文件夹
   quit       请正在运行的 ScreenFerry 退出，等它退出后返回（安装程序升级、卸载前用）
@@ -80,6 +82,7 @@ pub(crate) enum Mode {
         server: Option<SocketAddr>,
     },
     Peers,
+    InputKey,
     Forget {
         target: String,
     },
@@ -103,7 +106,7 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<Parsed, St
         None => "resident".to_owned(),
         Some(first) if first.starts_with('-') => "resident".to_owned(),
         Some(
-            command @ ("serve" | "connect" | "peers" | "forget" | "send" | "quit"
+            command @ ("serve" | "connect" | "peers" | "forget" | "input-key" | "send" | "quit"
             | "preview-capsule"),
         ) => {
             let command = command.to_owned();
@@ -165,6 +168,7 @@ pub(crate) fn parse(args: impl IntoIterator<Item = String>) -> Result<Parsed, St
             server: positional.as_deref().map(resolve).transpose()?,
         },
         "peers" => Mode::Peers,
+        "input-key" => Mode::InputKey,
         "quit" => Mode::Quit,
         "send" if paths.is_empty() => return Err("send 需要至少一个文件或文件夹".into()),
         "send" => Mode::Send { paths },

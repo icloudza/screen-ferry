@@ -57,6 +57,45 @@ async fn cursor_crosses_to_the_client_and_back() {
 }
 
 #[tokio::test]
+async fn the_configured_edge_delay_applies_in_both_directions() {
+    use std::time::Duration;
+
+    use ferry_engine::Live;
+    use ferry_types::DeviceSettings;
+
+    let rig = Rig::with(Setup {
+        live: Some(
+            Live {
+                side: ferry_core::Side::Right,
+                layout: Vec::new(),
+                devices: Vec::new(),
+                fallback: DeviceSettings {
+                    edge_delay_ms: 500,
+                    ..DeviceSettings::default()
+                },
+                mouse_dpi: 1600,
+            }
+            .fixed(),
+        ),
+        ..Setup::default()
+    })
+    .await;
+    rig.enter().await;
+    rig.push(-50, 0);
+    eventually("返回前停在客户端边缘", || {
+        rig.inject.events().contains(&motion(0, ENTRY.y))
+    })
+    .await;
+    assert!(rig.capture.is_grabbed(), "刚到返回边缘不能立即切回");
+    tokio::time::sleep(Duration::from_millis(550)).await;
+    rig.push(-1, 0);
+    eventually("等待后推出边缘回到本机", || {
+        !rig.capture.is_grabbed()
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn holding_a_button_keeps_the_cursor_on_the_client() {
     let rig = Rig::start().await;
     rig.enter().await;

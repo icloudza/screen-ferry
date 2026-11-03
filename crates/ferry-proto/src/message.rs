@@ -1,6 +1,8 @@
 //! 消息总表：类型号、所属连接、消息体分发。
 
-use ferry_types::{Display, InputEvent, KeyAction, KeyCode, MouseButton, Point, Side, TransferId};
+use ferry_types::{
+    Display, InputEvent, InputProof, KeyAction, KeyCode, MouseButton, Point, Side, TransferId,
+};
 
 use crate::clipboard::{ClipboardOffer, ClipboardRequest};
 use crate::edge::DropHint;
@@ -52,6 +54,10 @@ pub enum Message {
         seq: u32,
     },
     Input(InputEvent),
+    SecureChallenge {
+        nonce: [u8; 32],
+    },
+    SecureInput(InputProof),
     /// 发送方位于接收方的哪一侧。会话开始和方向改变时发送。需要 `EDGE_DROP` 能力。
     PeerSide {
         side: Side,
@@ -115,6 +121,8 @@ mod ty {
     pub(super) const DROP_HINT: u16 = 0x0104;
     pub(super) const OPEN_SETTINGS: u16 = 0x0105;
     pub(super) const APP_INFO: u16 = 0x0106;
+    pub(super) const SECURE_CHALLENGE: u16 = 0x0107;
+    pub(super) const SECURE_INPUT: u16 = 0x0108;
     pub(super) const KEY: u16 = 0x0110;
     pub(super) const POINTER_MOTION: u16 = 0x0120;
     pub(super) const POINTER_DELTA: u16 = 0x0121;
@@ -150,6 +158,8 @@ pub(crate) fn allowed(ty: u16, channel: Channel) -> Option<bool> {
         | ty::DROP_HINT
         | ty::OPEN_SETTINGS
         | ty::APP_INFO
+        | ty::SECURE_CHALLENGE
+        | ty::SECURE_INPUT
         | ty::KEY
         | ty::POINTER_MOTION
         | ty::POINTER_DELTA
@@ -174,6 +184,12 @@ pub(crate) fn allowed(ty: u16, channel: Channel) -> Option<bool> {
 }
 
 impl Message {
+    pub(crate) fn is_input_type(kind: u16) -> bool {
+        matches!(
+            kind,
+            ty::KEY | ty::POINTER_MOTION | ty::POINTER_DELTA | ty::BUTTON | ty::WHEEL
+        )
+    }
     /// 消息的类型号（见 docs/protocol.md 第 5 节）。日志里只记它，不记消息内容。
     pub fn type_id(&self) -> u16 {
         match self {
@@ -186,6 +202,8 @@ impl Message {
             Self::PairCommit { .. } => ty::PAIR_COMMIT,
             Self::PairNonce { .. } => ty::PAIR_NONCE,
             Self::PairResult { .. } => ty::PAIR_RESULT,
+            Self::SecureChallenge { .. } => ty::SECURE_CHALLENGE,
+            Self::SecureInput(_) => ty::SECURE_INPUT,
             Self::Displays(_) => ty::DISPLAYS,
             Self::Enter(_) => ty::ENTER,
             Self::Leave { .. } => ty::LEAVE,
@@ -218,6 +236,11 @@ impl Message {
 
     pub(crate) fn encode_body(&self, w: &mut Writer<'_>) -> Result<(), EncodeError> {
         match self {
+            Self::SecureChallenge { nonce } => {
+                w.array(nonce);
+                Ok(())
+            }
+            Self::SecureInput(proof) => proof.encode(w),
             Self::Hello(m) => m.encode(w),
             Self::Welcome(m) => m.encode(w),
             Self::Reject(m) => m.encode(w),
@@ -261,6 +284,8 @@ impl Message {
 
     pub(crate) fn decode_body(ty: u16, r: &mut Reader<'_>) -> Result<Self, DecodeError> {
         Ok(match ty {
+            ty::SECURE_CHALLENGE => Self::SecureChallenge { nonce: r.array()? },
+            ty::SECURE_INPUT => Self::SecureInput(InputProof::decode(r)?),
             ty::HELLO => Self::Hello(Hello::decode(r)?),
             ty::WELCOME => Self::Welcome(Welcome::decode(r)?),
             ty::REJECT => Self::Reject(Reject::decode(r)?),

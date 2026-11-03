@@ -14,11 +14,15 @@ pub mod pairing;
 mod error;
 mod fingerprint;
 mod identity;
+mod input_proof;
 mod peers;
 mod verifier;
 
 pub use error::{Error, Result};
 pub use fingerprint::Fingerprint;
 pub use identity::Identity;
+pub use input_proof::{
+    InputAuthorization, InputProofVerifier, InputSigner, PROOF_LEASE, PROOF_LIFETIME,
+};
 pub use peers::{Peer, PeerList};
 pub use verifier::AnyPeerVerifier;

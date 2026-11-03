@@ -4,5 +4,7 @@
 
 mod codec;
 mod handshake;
+mod input_agent;
 mod message;
+mod secure_input;
 mod support;

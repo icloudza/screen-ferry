@@ -12,6 +12,7 @@ test = false
 [dependencies]
 ferry-platform.workspace = true
 ferry-types.workspace = true
+ferry-trust.workspace = true
 
 [lints]
 workspace = true

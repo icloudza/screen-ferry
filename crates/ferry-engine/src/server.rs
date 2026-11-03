@@ -25,10 +25,11 @@ use ferry_net::discovery::Advertiser;
 use ferry_net::{Framed, ServerStream, Tls};
 use ferry_platform::{CaptureEvent, Captured, Clipboard, Displays, InputCapture};
 use ferry_proto::{
-    Bye, ByeReason, Capabilities, Channel, DropHint, Enter, Hello, Message, RejectReason, Welcome,
+    Bye, ByeReason, Capabilities, Channel, DropHint, Enter, Hello, Message, RejectReason,
+    SecureAction, Welcome,
 };
 use ferry_store::Store;
-use ferry_trust::{Fingerprint, Peer};
+use ferry_trust::{Fingerprint, InputSigner, Peer};
 use ferry_types::{
     DeviceSettings, Display, InputEvent, KeyAction, KeyCode, Placement, Point, Rect, mark,
 };
@@ -195,12 +196,14 @@ struct NewSession {
     welcome: Welcome,
     remote: Vec<Display>,
     framed: Framed<ServerStream>,
+    signed: Option<SignedOutput>,
 }
 
 /// 连接握手（在各自的任务里进行）需要的东西。
 struct Shared<P> {
     capabilities: Capabilities,
     tls: Tls,
+    signer: Arc<InputSigner>,
     fingerprint: Fingerprint,
     name: String,
     store: Store,
@@ -306,6 +309,7 @@ where
     ) -> Result<Self> {
         let identity = config.store.identity(&config.name)?;
         let tls = Tls::new(&identity)?;
+        let signer = Arc::new(InputSigner::new(&identity)?);
         let (tx, events) = mpsc::unbounded_channel();
         capture.start(Box::new(move |event| {
             let _ = tx.send(event);
@@ -316,6 +320,7 @@ where
         let shared = Arc::new(Shared {
             capabilities: capabilities(config.clipboard, config.command_key),
             tls,
+            signer,
             fingerprint: identity.fingerprint(),
             name: config.name.clone(),
             store: config.store.clone(),
@@ -402,6 +407,7 @@ where
             welcome,
             remote,
             framed,
+            signed,
         } = new;
         // 同一台设备重连：新会话顶替旧会话。
         let stale: Vec<u64> = self
@@ -438,7 +444,7 @@ where
         let io = tokio::spawn(run_session(
             framed,
             id,
-            peer,
+            (peer, signed),
             out_rx,
             active.subscribe(),
             self.shared.arrivals.clone(),
@@ -600,11 +606,14 @@ where
                     {
                         self.perform(id, t, false);
                     }
-                } else if let Some((id, t)) = self.neighbors.remote_motion(dx, dy, free) {
+                } else if let Some((id, t)) =
+                    self.neighbors.remote_motion(dx, dy, free, Instant::now())
+                {
                     self.perform(id, t, false);
                 }
             }
             CaptureEvent::Button { button, pressed } => {
+                self.neighbors.reset_wait();
                 let event = InputEvent::Button {
                     button,
                     pressed,
@@ -798,7 +807,7 @@ where
         self.publish_edges();
     }
 
-    /// 按一台设备的设置调整光标在它上面的速度，以及切过去前在边上停多久。
+    /// 按一台设备的设置调整光标速度，以及往返切换前在边上停多久。
     fn apply_pointer(&mut self, id: u64, settings: &DeviceSettings, mouse_dpi: u32) {
         let base = mouse_dpi.max(1);
         let dpi = match settings.pointer_dpi {
@@ -975,6 +984,21 @@ async fn handshake<P: ConfirmPairing>(
             let remote = timeout(HANDSHAKE_TIMEOUT, expect_displays(&mut framed))
                 .await
                 .map_err(|_| Error::Timeout("等待对方的显示器信息"))??;
+            let signed = if welcome.capabilities.contains(Capabilities::SECURE_INPUT) {
+                match timeout(HANDSHAKE_TIMEOUT, framed.recv())
+                    .await
+                    .map_err(|_| Error::Timeout("等待安全输入挑战"))??
+                {
+                    Some(Message::SecureChallenge { nonce }) => Some(SignedOutput {
+                        signer: shared.signer.clone(),
+                        nonce,
+                        next: 1,
+                    }),
+                    _ => return Err(Error::Protocol("安全输入协商缺少代理挑战")),
+                }
+            } else {
+                None
+            };
             if welcome.capabilities.contains(Capabilities::APP_INFO) {
                 send(&mut framed, &crate::link::app_info()).await?;
             }
@@ -986,6 +1010,7 @@ async fn handshake<P: ConfirmPairing>(
                 welcome,
                 remote,
                 framed,
+                signed,
             };
             let _ = shared.arrivals.send(Arrival::Session(Box::new(new))).await;
             Ok(())
@@ -1035,28 +1060,65 @@ async fn pair<P: ConfirmPairing>(
     Ok(())
 }
 
+struct SignedOutput {
+    signer: Arc<InputSigner>,
+    nonce: [u8; 32],
+    next: u64,
+}
+impl SignedOutput {
+    fn packet(&mut self, action: SecureAction) -> Result<Message> {
+        let body = action
+            .encode()
+            .map_err(|_| Error::Protocol("签署输入动作不能编码"))?;
+        let proof = self.signer.sign(self.nonce, self.next, body)?;
+        self.next = self
+            .next
+            .checked_add(1)
+            .ok_or(Error::Protocol("远端输入序号耗尽"))?;
+        Ok(Message::SecureInput(proof))
+    }
+}
+
 /// 一个会话的收发：发出主循环交来的消息，回应心跳、测往返延迟，把要处理的消息交回主循环。
 /// 结束时（对方断开、心跳超时、出错、主循环不要它了）告诉主循环。
 async fn run_session(
     mut framed: Framed<ServerStream>,
     id: u64,
-    peer: Fingerprint,
+    security: (Fingerprint, Option<SignedOutput>),
     mut outbox: mpsc::Receiver<Message>,
     active: watch::Receiver<bool>,
     arrivals: mpsc::Sender<Arrival>,
     events: Events,
 ) {
+    let (peer, mut signed) = security;
+    let mut signed_at = Instant::now();
     let mut heartbeat = Heartbeat::new();
     let mut tick = interval(heartbeat::TICK);
     tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    let mut input_reported = Instant::now();
+    let mut sent_inputs = 0_u64;
     let result: Result<()> = async {
         loop {
             tokio::select! {
                 message = outbox.recv() => match message {
-                    Some(message) => send(&mut framed, &message).await?,
+                    Some(message) => {
+                        if matches!(message, Message::Input(_)) { sent_inputs += 1; }
+                        let message = match &mut signed {
+                            Some(output) => match SecureAction::from_message(&message) {
+                                Some(action) => output.packet(action)?,
+                                None => message,
+                            },
+                            None => message,
+                        };
+                        send(&mut framed, &message).await?;
+                    }
                     None => return Ok(()),
                 },
                 message = framed.recv() => match message? {
+                    Some(Message::SecureChallenge { nonce }) => {
+                        let output = signed.as_mut().ok_or(Error::Protocol("未协商安全输入"))?;
+                        output.nonce = nonce;
+                    }
                     Some(Message::Pong { nonce }) => {
                         if let Some(rtt) = heartbeat.pong(nonce) {
                             events.emit(Event::Rtt { peer, rtt });
@@ -1077,6 +1139,15 @@ async fn run_session(
                     Some(other) => debug!(kind = format_args!("{:#06x}", other.type_id()), "忽略消息"),
                 },
                 _ = tick.tick() => {
+                    if signed_at.elapsed() >= Duration::from_millis(250) {
+                        if let Some(output) = &mut signed { send(&mut framed, &output.packet(SecureAction::Alive)?).await?; }
+                        signed_at = Instant::now();
+                    }
+                    if input_reported.elapsed() >= Duration::from_secs(5) {
+                        debug!(session = id, sent_inputs, remote = !*active.borrow(), "输入转发统计（过去 5 秒）");
+                        sent_inputs = 0;
+                        input_reported = Instant::now();
+                    }
                     if heartbeat.timed_out() {
                         let bye = Bye { reason: ByeReason::TIMEOUT };
                         let _ = send(&mut framed, &Message::Bye(bye)).await;

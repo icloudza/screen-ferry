@@ -9,9 +9,14 @@ publish.workspace = true
 [lib]
 test = false
 
+[features]
+experimental-secure-input = []
+
 [dependencies]
 ferry-core.workspace = true
 ferry-platform.workspace = true
+ferry-proto.workspace = true
+ferry-trust.workspace = true
 ferry-types.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]

@@ -72,9 +72,12 @@ About the Windows installer:
 
 - It isn't code-signed. If SmartScreen blocks it, choose More info → Run anyway.
 - It installs into Program Files and allows ScreenFerry through the firewall on private and domain networks.
-- Updates install silently after one administrator prompt. While another computer controls this one, use this computer's own keyboard and mouse to approve it. Uninstall from Settings → Apps; your settings and pairings are kept.
+- Experimental builds include an optional UAC input service for Windows testing. It is disabled in standard builds pending security review and Windows acceptance testing; paired devices require separate administrator authorization for UAC. Network connections, clipboard and files stay in the normal user process.
+- Updates install silently after one administrator prompt. Without secure input, use this computer's own keyboard and mouse to approve it. Uninstall from Settings → Apps; your settings and pairings are kept.
 
 ## Usage
+
+This development branch uses protocol 2. Update both computers together.
 
 1. Open ScreenFerry on both computers. By default a Mac controls and a Windows PC is controlled; change this in Settings → This Computer. When both computers run the same system, set the one without the keyboard and mouse to Be Controlled.
 2. On the controlled computer, choose the controlling one on the Devices page and confirm the 6-digit pairing code on both sides. If it isn't found on the network, use Connect by Address, or Invite a Computer from the controlling one. The address is at the top of the other computer's Devices page.

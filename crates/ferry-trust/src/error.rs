@@ -10,6 +10,8 @@ pub enum Error {
     InvalidFingerprint,
     #[error("系统随机数不可用")]
     Random,
+    #[error("安全输入认证失败：{0}")]
+    InputProof(&'static str),
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;

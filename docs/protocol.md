@@ -1,6 +1,6 @@
 # 线协议
 
-- 当前版本：**1**（草案：首次发布前仍可修改，发布后线上格式冻结）
+- 当前版本：**2**（新增代理独立验证的签署输入，两端须一起更新；普通构建仍关闭实验 UAC 服务）
 - 实现：`crates/ferry-proto`
 - 测试：`crates/ferry-proto/tests/suite/`；fuzz：`fuzz/fuzz_targets/decode.rs`
 
@@ -84,6 +84,7 @@
   - `PeerSide`、`DropHint` 需要 `EDGE_DROP`
   - `OpenSettings` 需要 `REMOTE_SETTINGS`
   - `AppInfo` 需要 `APP_INFO`：输入连接握手后，双方各发一次自己的程序版本（ADR 0014）
+  - `SecureChallenge`、`SecureInput` 需要 `SECURE_INPUT`（bit 7）：只有管理员另行授权远端的被控端才声明此能力。
 - `COMMAND_KEY` 说明发送方的快捷键以 Command 键为主（macOS），不是一项能力。服务端看客户端 `Hello` 里的这一位：
   两边一个是一个不是时，才按设置互换 Command 与 Ctrl。不认识这一位的旧版客户端都是 Windows，结果不变。
 - `Hello`、`Welcome`、`Reject` 的消息体格式在所有版本中永久不变，版本不同的双方也总能完成协商。
@@ -136,6 +137,8 @@
 | `0x0104` | DropHint | 输入 | `state u8` · `along u16` · `closeness u8` · `name str` · `items u32` · `bytes u64` |
 | `0x0105` | OpenSettings | 输入 | 空 |
 | `0x0106` | AppInfo | 输入 | `version str`，最多 64 字节 |
+| `0x0107` | SecureChallenge | 输入 | `nonce [32]`，需要 `SECURE_INPUT` |
+| `0x0108` | SecureInput | 输入 | `challenge [32]` · `sequence u64` · `body [32]` · `signature [64]`，需要 `SECURE_INPUT` |
 | `0x0110` | Key | 输入 | `code u32` · `action u8` |
 | `0x0120` | PointerMotion | 输入 | `position Point` |
 | `0x0121` | PointerDelta | 输入 | `dx i32` · `dy i32` |
@@ -208,6 +211,25 @@
 ### 坐标
 
 所有坐标都使用**接收方**的桌面坐标系：macOS 为点（point），Windows 为物理像素。接收方用 `Displays` 声明自己的坐标系。会话中途显示器布局变了（改分辨率、缩放、插拔显示器）时再发一次 `Displays`，对方以最新的一份为准。`Button` 和 `Wheel` 带上当时的光标位置，接收方先移动光标再执行。
+
+### 签署输入（版本 2）
+
+`0x0107 SecureChallenge` 的消息体为随机数 `[32]`；`0x0108 SecureInput` 为
+`challenge [32] · sequence u64 · body [32] · signature [64]`，只能出现在输入连接。
+双方协商 `SECURE_INPUT` 后，客户端先发 `Displays`、紧接第一条 `SecureChallenge`，再发可选的 `AppInfo`。
+服务端取得初始挑战后才启动该会话的输出。后续挑战经输入连接更新，不重置序号。
+
+`body` 为动作的原消息类型号 `u16` 加原消息体，再以零补足 32 字节；只允许 `Enter`、`Leave` 和键鼠 `Input`。
+类型号 0、其余全零表示远端签署的保活，不允许通过此正文嵌入其他协议消息。
+签名为 ring ECDSA P-256/SHA-256 FIXED 的 `r || s`，覆盖 ASCII 域
+`ScreenFerry secure input proof v2`、一个 NUL 字节、challenge、sequence 的小端编码及完整 body。
+控制端只为自己输出的动作签名，每 250 ms 发送签署保活；没有为客户端指定动作签名的接口。
+
+代理使用管理员按用户 SID 另行登记的公钥验证，不信任普通配对配置。挑战由代理生成，每 250 ms 按需轮换，
+有效 1 秒；每条管道从序号 1 连续递增。只有有效远端证明续期 1.5 秒租约，本机 Check 不续期。
+代理负责完整动作的定位、锁定键、按键和光标执行；普通后台原样转发证明，不能拆改为原始特权输入。
+签署会话收到未签署的 Enter/Leave/Input、无效证明或重放时关闭，不降级到原始输入。
+未获管理员 UAC 授权的配对设备不协商此能力，仍使用普通权限输入。详见 ADR 0016。
 
 ### 按键
 

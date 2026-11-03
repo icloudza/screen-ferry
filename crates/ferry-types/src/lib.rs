@@ -13,6 +13,7 @@ mod device;
 mod display;
 mod geometry;
 mod input;
+mod input_proof;
 mod key;
 pub mod mark;
 mod pointer;
@@ -27,6 +28,7 @@ pub use device::{
 pub use display::{Display, DisplayId};
 pub use geometry::{Point, Rect, Side};
 pub use input::InputEvent;
+pub use input_proof::InputProof;
 pub use key::{KeyAction, KeyCode, LockKeys};
 pub use pointer::{MouseButton, WHEEL_NOTCH};
 pub use scene::{Align, Frame, Hit, Rgba, Scene, Shape, Weight};

@@ -63,6 +63,7 @@ pub(crate) fn run(options: Options) -> ExitCode {
     match options.mode {
         Mode::Resident { autostart } => return report(resident(store, autostart)),
         Mode::Peers => return report(list_peers(&store)),
+        Mode::InputKey => return report(input_key(&store, &options.name)),
         Mode::Forget { target } => return report(forget(&store, &target)),
         Mode::Send { paths } => return report(send_files(&store, paths)),
         Mode::Quit => return report(quit(&store)),
@@ -140,6 +141,7 @@ pub(crate) fn run(options: Options) -> ExitCode {
                 }
                 Mode::Resident { .. }
                 | Mode::Peers
+                | Mode::InputKey
                 | Mode::Forget { .. }
                 | Mode::Send { .. }
                 | Mode::Quit
@@ -308,6 +310,13 @@ fn forget(store: &Store, target: &str) -> Result<(), Box<dyn std::error::Error>>
         }
         _ => Err(format!("{target} 对应多台设备，请改用更长的指纹").into()),
     }
+}
+
+fn input_key(store: &Store, name: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let identity = store.identity(name)?;
+    let signer = ferry_trust::InputSigner::new(&identity)?;
+    println!("{}", signer.authorization().to_code());
+    Ok(())
 }
 
 #[cfg(target_os = "macos")]

@@ -20,6 +20,16 @@ pub fn samples() -> Vec<(Channel, Message)> {
     let input = |event| (Channel::Input, Message::Input(event));
 
     vec![
+        (Channel::Input, Message::SecureChallenge { nonce: [7; 32] }),
+        (
+            Channel::Input,
+            Message::SecureInput(ferry_types::InputProof {
+                challenge: [8; 32],
+                sequence: 1,
+                body: [0; 32],
+                signature: [9; 64],
+            }),
+        ),
         (
             Channel::Input,
             Message::Hello(Hello::new(
