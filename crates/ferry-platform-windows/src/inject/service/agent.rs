@@ -28,7 +28,6 @@ use crate::inject::LocalInject;
 
 /// 仅 SYSTEM 可运行。核验父服务后，将停止事件按最小等待权限复制到本会话。
 pub fn run_agent(parent_pid: u32, stop_handle: usize) -> Result<()> {
-    super::require_experimental()?;
     system_environment()?;
     let installed = Installed::load()?;
     let session = security::current_session()?;
@@ -227,7 +226,9 @@ fn secure_action(
     match action {
         SecureAction::Alive => {
             desks.execute(Command::Check, expires)?;
-            if !*entered {
+            // 只藏一次。保活每 250 毫秒来一条，每次都藏会把光标反复挪回屏幕中央，
+            // 这台电脑的人就没法用自己的鼠标了；藏好之后他一动鼠标，光标照常出现。
+            if !*entered && !desks.hidden {
                 desks.execute(Command::Cursor { hidden: true }, expires)?;
             }
         }

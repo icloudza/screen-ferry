@@ -325,6 +325,12 @@ mod win {
         }
 
         fn overlay(&self) -> WinOverlay {
+            if ferry_platform_windows::is_elevated() {
+                // Windows 不让普通权限的程序往管理员程序的窗口拖放，边缘的接收条收不到资源管理器拖来的文件。
+                warn!(
+                    "ScreenFerry 正以管理员身份运行：从这台电脑把文件拖到屏幕边缘不会有反应（Windows 的限制）。要拖文件，请以普通方式启动，或者用 screenferry send <文件> 发送"
+                );
+            }
             WinOverlay::new()
         }
 

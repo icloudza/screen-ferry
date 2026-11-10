@@ -25,6 +25,7 @@ struct State {
     verifier: Option<InputProofVerifier>,
     verified: Vec<InputProof>,
     ended: u64,
+    local_pointer: Option<(ferry_types::Point, bool)>,
 }
 
 impl MockInject {
@@ -44,6 +45,11 @@ impl MockInject {
     }
     pub fn ended_input_sessions(&self) -> u64 {
         self.lock().ended
+    }
+
+    /// 模拟本机用户自己动鼠标：位置和是否按着左键。
+    pub fn set_local_pointer(&self, pointer: Option<(ferry_types::Point, bool)>) {
+        self.lock().local_pointer = pointer;
     }
 
     /// 至今注入过的全部事件。
@@ -118,6 +124,10 @@ impl InputInject for MockInject {
             state.ended += 1;
         }
         Ok(())
+    }
+
+    fn local_pointer(&mut self) -> Option<(ferry_types::Point, bool)> {
+        self.lock().local_pointer
     }
 
     fn check_available(&mut self) -> Result<()> {

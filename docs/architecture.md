@@ -24,13 +24,13 @@ tokio 运行时里；托盘需要更新时，经 `ferry-platform` 的 `EventLoop
 暂停共享即停止引擎，改了需要重新握手的设置就重启引擎，屏幕方向等设置即时生效；
 首次配对的配对码在设置界面上核对。
 
-实验构建启用安全输入时，Windows 的 `InputInject` 实现通过受限的本机命名管道连接代理，双方校验内核报告的进程身份、会话及
+安装时选了安全输入时，Windows 的 `InputInject` 实现通过受限的本机命名管道连接代理，双方校验内核报告的进程身份、会话及
 固定安装映像。代理在 Default/Winlogon 桌面之间选择工作线程，不重启网络连接。定长协议在 `ferry-proto::input_agent`，
 序号和租约在 `ferry-core::InputLease`；Windows API 全部位于 `ferry-platform-windows/src/inject/`。
 服务复制自身令牌进入用户会话，不继承任何句柄；代理核验父服务后只复制停止事件的等待权限，并移除不必要的令牌特权。
 见 [ADR 0015](adr/0015-windows-secure-input-service.md) 与 [实机验收](input-troubleshooting.md)。
 来源认证见 [ADR 0016](adr/0016-authenticate-secure-input-origin.md)：控制端签署完整输入，代理核验管理员授权、短时挑战及连续序号；普通后台只转发。
-授权位于 Windows 受保护的 HKLM 策略，按用户 SID 隔离，普通配对不能授予 UAC 权限。正式构建保持关闭，等待安全复查及 Windows 实机验收。
+授权位于 Windows 受保护的 HKLM 策略，按用户 SID 隔离，普通配对不能授予 UAC 权限。安装时默认不选。
 
 ## 网络连接
 

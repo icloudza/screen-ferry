@@ -1,6 +1,6 @@
 # Windows 安全输入手工验收
 
-本包是命令行实验验收包，不含 Flutter 设置界面，不是正式安装器。仅在没有现有 ScreenFerry 安装的隔离 Windows 10/11 x64 测试机使用，使用测试账户和测试密码。
+本包是命令行验收包，不含 Flutter 设置界面，不是正式安装器。仅在没有现有 ScreenFerry 安装的隔离 Windows 10/11 x64 测试机使用，使用测试账户和测试密码。
 输入来源认证不提供防普通后台读取输入正文的端到端保密；不要用本包输入真实管理员密码。
 
 ## 1. 准备两端
@@ -12,7 +12,7 @@ cargo xtask input-validation --target x86_64-pc-windows-gnu
 ```
 
 输出在 `target/input-validation/windows/`。`ScreenFerry/` 里只有后台和服务两个程序；`build.json` 记录构建目标、实验开关和各程序的 SHA-256。
-macOS/Windows 还会生成 `target/input-validation/ScreenFerry-secure-input-experimental-windows-x64.zip`，解压后进入包含 README 的 `windows/` 目录。
+macOS/Windows 还会生成 `target/input-validation/ScreenFerry-secure-input-windows-x64.zip`，解压后进入包含 README 的 `windows/` 目录。
 这是 release 构建的独立测试产物，不是 GitHub Release 附件，也不能用于验证正式安装器的安装/更新流程。
 
 Mac 也必须使用同一开发代码（协议 2），不要使用协议 1 的已发布程序。退出原来的后台，然后在 Mac 的仓库目录运行：
@@ -23,7 +23,7 @@ cargo run -p ferry-daemon -- serve --no-announce --no-clipboard -v
 
 若提示没有捕获权限，按 README 授予当前开发程序辅助功能权限。记下 Mac 的局域网 IP。
 
-## 2. 在 Windows 安装实验服务
+## 2. 在 Windows 安装服务
 
 把包复制到 Windows 并解压，在解压目录打开**管理员 PowerShell**，执行：
 

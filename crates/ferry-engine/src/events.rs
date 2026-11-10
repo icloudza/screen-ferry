@@ -123,7 +123,7 @@ impl DialError {
             Error::Io(e) => io_kind(e),
             Error::Net(ferry_net::Error::Io(e)) => io_kind(e),
             Error::Net(ferry_net::Error::Rejected(r)) => match r.reason {
-                RejectReason::INCOMPATIBLE_VERSION => Self::Incompatible,
+                RejectReason::INCOMPATIBLE_FORMAT => Self::Incompatible,
                 RejectReason::BUSY => Self::Busy,
                 _ => Self::Refused,
             },

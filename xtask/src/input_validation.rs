@@ -26,15 +26,13 @@ pub(crate) fn run(args: &[String]) -> Result<(), String> {
             "ferry-service",
             "-p",
             "ferry-daemon",
-            "--features",
-            "ferry-service/experimental-secure-input",
             "--target",
             target,
         ])
         .status()
         .map_err(|e| format!("无法构建验收程序：{e}"))?;
     if !status.success() {
-        return Err("实验验收程序构建失败".into());
+        return Err("验收程序构建失败".into());
     }
 
     let output = root.join("target/input-validation/windows");
@@ -68,8 +66,7 @@ pub(crate) fn run(args: &[String]) -> Result<(), String> {
         "target": target,
         "profile": "release",
         "source_version": env!("CARGO_PKG_VERSION"),
-        "protocol": ferry_proto::PROTOCOL_VERSION,
-        "experimental_secure_input": true,
+        "protocol": ferry_proto::WIRE_FORMAT,
         "files": hashes,
     });
     fs::write(
@@ -77,8 +74,7 @@ pub(crate) fn run(args: &[String]) -> Result<(), String> {
         serde_json::to_vec_pretty(&metadata).map_err(|e| e.to_string())?,
     )
     .map_err(|e| e.to_string())?;
-    let archive =
-        root.join("target/input-validation/ScreenFerry-secure-input-experimental-windows-x64.zip");
+    let archive = root.join("target/input-validation/ScreenFerry-secure-input-windows-x64.zip");
     let mut pack = match std::env::consts::OS {
         "macos" => {
             let mut command = Command::new("ditto");

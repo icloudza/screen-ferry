@@ -34,14 +34,13 @@
 //! ```text
 //! ScreenFerry\
 //! ├─ screenferry.exe                后台，C 运行库静态链接；图标、版本信息、程序清单见 packaging/windows/
-//! ├─ screenferry-service.exe        可选的 Windows 安全桌面输入服务
+//! ├─ screenferry-service.exe        可选的 Windows 安全输入服务，安装时勾选才登记（ADR 0015）
 //! └─ settings\                      Flutter 设置界面：screenferry-settings.exe、flutter_windows.dll、data\，
 //!                                    以及它需要的 Visual C++ 运行库（msvcp140.dll 等三个）
 //! ```
 //!
 //! 需要 Visual Studio（C++ 工具，附带运行库）和 Inno Setup 7.1 或更高版本（自带简体中文）；
 //! ISCC.exe 不在默认位置时用环境变量 `ISCC` 指定。
-//! `--experimental-secure-input` 仅供隔离 Windows 虚拟机验证，开放尚未完成安全验收的 UAC 服务选项。
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -57,7 +56,6 @@ const LSREGISTER: &str = "/System/Library/Frameworks/CoreServices.framework/Fram
 /// 打包选项，见本文件开头。
 #[derive(Default)]
 struct Options {
-    experimental_secure_input: bool,
     universal: bool,
     notarize: bool,
     dmg: bool,
@@ -71,7 +69,6 @@ pub(crate) fn run(args: &[String]) -> Result {
     let mut options = Options::default();
     for arg in args {
         match arg.as_str() {
-            "--experimental-secure-input" => options.experimental_secure_input = true,
             "--universal" => options.universal = true,
             "--notarize" => options.notarize = true,
             "--dmg" => options.dmg = true,
@@ -79,9 +76,6 @@ pub(crate) fn run(args: &[String]) -> Result {
         }
     }
     match std::env::consts::OS {
-        "macos" if options.experimental_secure_input => {
-            Err("实验安全输入构建仅支持 Windows".into())
-        }
         "macos" => macos(&root, &options),
         "windows" => windows(&root, &options),
         other => Err(format!("还不支持在 {other} 上打包")),
@@ -91,25 +85,24 @@ pub(crate) fn run(args: &[String]) -> Result {
 /// 设置界面（Flutter）依赖的 Visual C++ 运行库，放在它旁边，没装过运行库的电脑也能打开。
 const VC_RUNTIME: [&str; 3] = ["msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll"];
 
-fn windows(root: &Path, options: &Options) -> Result {
+fn windows(root: &Path, _options: &Options) -> Result {
     let version = workspace_version(root)?;
     // 先找齐工具，免得编译完才发现缺东西。
     let iscc = find_iscc()?;
     let runtime = vc_runtime_dir()?;
 
     step("编译后台（release）");
-    let mut build = vec![
-        "build",
-        "--release",
-        "-p",
-        "ferry-daemon",
-        "-p",
-        "ferry-service",
-    ];
-    if options.experimental_secure_input {
-        build.extend(["--features", "ferry-service/experimental-secure-input"]);
-    }
-    cargo(root, &build)?;
+    cargo(
+        root,
+        &[
+            "build",
+            "--release",
+            "-p",
+            "ferry-daemon",
+            "-p",
+            "ferry-service",
+        ],
+    )?;
 
     step("编译设置界面（flutter build windows --release）");
     let app_dir = root.join("app");
@@ -141,11 +134,7 @@ fn windows(root: &Path, options: &Options) -> Result {
     if setup.exists() {
         fs::remove_file(&setup).map_err(|e| io(&setup, e))?;
     }
-    let mut command = Command::new(&iscc);
-    if options.experimental_secure_input {
-        command.arg("/DSecureInputExperimental=1");
-    }
-    let status = command
+    let status = Command::new(&iscc)
         .arg("--quiet-progress")
         .arg(format!("/DAppVersion={version}"))
         .arg(format!("/DSourceDir={}", out.display()))

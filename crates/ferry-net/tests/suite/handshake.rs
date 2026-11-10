@@ -1,5 +1,5 @@
 use ferry_net::{Error, Framed, accept, initiate};
-use ferry_proto::{Capabilities, Channel, Hello, PROTOCOL_VERSION, RejectReason};
+use ferry_proto::{Capabilities, Channel, Hello, RejectReason, WIRE_FORMAT};
 use tokio::io::duplex;
 
 #[tokio::test]
@@ -30,7 +30,7 @@ async fn version_mismatch_is_rejected_on_both_sides() {
     let mut server = Framed::new(b, Channel::Input);
 
     let hello = Hello {
-        version: PROTOCOL_VERSION + 1,
+        format: WIRE_FORMAT + 1,
         ..Hello::new(Channel::Input, Capabilities::empty(), 0, "新版")
     };
     let (initiated, accepted) = tokio::join!(
@@ -40,7 +40,7 @@ async fn version_mismatch_is_rejected_on_both_sides() {
 
     for result in [initiated.map(drop), accepted.map(drop)] {
         match result {
-            Err(Error::Rejected(r)) => assert_eq!(r.reason, RejectReason::INCOMPATIBLE_VERSION),
+            Err(Error::Rejected(r)) => assert_eq!(r.reason, RejectReason::INCOMPATIBLE_FORMAT),
             other => panic!("应被拒绝，实际 {other:?}"),
         }
     }

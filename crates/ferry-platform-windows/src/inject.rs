@@ -16,23 +16,29 @@ pub use service::{
 
 use ferry_platform::{Error, InputInject, Result};
 use ferry_types::{InputEvent, KeyAction, KeyCode, LockKeys, MouseButton, Point};
-use windows::Win32::Foundation::{ERROR_SUCCESS, GetLastError, SetLastError};
+use windows::Win32::Foundation::{ERROR_SUCCESS, GetLastError, POINT, SetLastError};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetKeyState, INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBD_EVENT_FLAGS, KEYBDINPUT,
-    KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_SCANCODE, MOUSE_EVENT_FLAGS,
+    GetAsyncKeyState, GetKeyState, INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBD_EVENT_FLAGS,
+    KEYBDINPUT, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_SCANCODE, MOUSE_EVENT_FLAGS,
     MOUSEEVENTF_ABSOLUTE, MOUSEEVENTF_HWHEEL, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP,
     MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP, MOUSEEVENTF_MOVE, MOUSEEVENTF_RIGHTDOWN,
     MOUSEEVENTF_RIGHTUP, MOUSEEVENTF_VIRTUALDESK, MOUSEEVENTF_WHEEL, MOUSEEVENTF_XDOWN,
-    MOUSEEVENTF_XUP, MOUSEINPUT, SendInput, VIRTUAL_KEY, VK_CAPITAL, VK_NUMLOCK, VK_SCROLL,
+    MOUSEEVENTF_XUP, MOUSEINPUT, SendInput, VIRTUAL_KEY, VK_CAPITAL, VK_LBUTTON, VK_NUMLOCK,
+    VK_RBUTTON, VK_SCROLL,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetSystemMetrics, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
-    XBUTTON1, XBUTTON2,
+    GetCursorPos, GetSystemMetrics, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_SWAPBUTTON,
+    SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, XBUTTON1, XBUTTON2,
 };
 
 use crate::display::{ensure_dpi_aware, last_error};
 use crate::keymap::{WinKey, win_key};
 use hider::CursorHider;
+
+/// 后台是不是以管理员身份运行。这时 Windows 不让普通程序（例如资源管理器）往它的窗口拖放。
+pub fn is_elevated() -> bool {
+    availability::current_elevated()
+}
 
 /// 本机键鼠注入。
 #[derive(Debug)]
@@ -57,6 +63,22 @@ impl Default for LocalInject {
 impl InputInject for LocalInject {
     fn check_available(&mut self) -> Result<()> {
         availability::check()
+    }
+
+    fn local_pointer(&mut self) -> Option<(Point, bool)> {
+        let mut at = POINT::default();
+        // SAFETY: 只读查询光标位置和鼠标左键的实时状态，输出指向本地变量。
+        // 左右键互换时系统的“主键”是右键，按系统设置取。
+        unsafe {
+            GetCursorPos(&mut at).ok()?;
+            let primary = if GetSystemMetrics(SM_SWAPBUTTON) != 0 {
+                VK_RBUTTON
+            } else {
+                VK_LBUTTON
+            };
+            let held = GetAsyncKeyState(i32::from(primary.0)) < 0;
+            Some((Point::new(at.x, at.y), held))
+        }
     }
 
     fn inject(&mut self, event: &InputEvent) -> Result<()> {

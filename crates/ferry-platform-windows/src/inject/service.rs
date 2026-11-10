@@ -17,13 +17,3 @@ pub use policy::{authorize, revoke};
 const NAME: &str = "ScreenFerryInput";
 const SERVICE_EXE: &str = "screenferry-service.exe";
 const DAEMON_EXE: &str = "screenferry.exe";
-
-fn require_experimental() -> ferry_platform::Result<()> {
-    if cfg!(feature = "experimental-secure-input") {
-        Ok(())
-    } else {
-        Err(ferry_platform::Error::Unsupported(
-            "安全输入代理仍在实验阶段；正式构建不开放 UAC 通道",
-        ))
-    }
-}

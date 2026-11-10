@@ -62,6 +62,12 @@ pub(super) fn check() -> Result<()> {
     Ok(())
 }
 
+/// 本进程是不是以管理员身份运行。查不出来时当作不是。
+pub(super) fn current_elevated() -> bool {
+    // SAFETY: 只读查询本进程令牌。伪句柄属于系统，不能 CloseHandle。
+    unsafe { elevated(GetCurrentProcess()) == Some(true) }
+}
+
 /// 查询进程是否已提升；不可查询时不猜测权限。每次打开的令牌都在返回前关闭。
 unsafe fn elevated(process: HANDLE) -> Option<bool> {
     // SAFETY: process 是调用方提供的有效进程句柄；只申请查询权限。输出缓冲区大小与类型一致。

@@ -1,13 +1,13 @@
 //! mDNS 发现：服务端在局域网里广播自己，客户端不填地址也能找到它。
 //!
-//! 广播内容（TXT 记录）：`fp` 证书指纹、`name` 设备名、`v` 协议版本。
+//! 广播内容（TXT 记录）：`fp` 证书指纹、`name` 设备名、`v` 格式标记（固定为 1，见 `ferry_proto::WIRE_FORMAT`）。
 //! 这些内容谁都能伪造，只用来找到地址；连上之后仍以 TLS 握手中的证书指纹为准。
 
 use std::collections::BTreeMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use ferry_proto::PROTOCOL_VERSION;
+use ferry_proto::WIRE_FORMAT;
 use ferry_trust::{Fingerprint, PeerList};
 use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
 
@@ -45,7 +45,7 @@ impl Advertiser {
         let properties = [
             (TXT_FINGERPRINT, fingerprint.to_hex()),
             (TXT_NAME, name.to_owned()),
-            (TXT_VERSION, PROTOCOL_VERSION.to_string()),
+            (TXT_VERSION, WIRE_FORMAT.to_string()),
         ];
         let info = ServiceInfo::new(SERVICE_TYPE, &instance, &host, "", port, &properties[..])
             .map_err(mdns)?
@@ -117,9 +117,9 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// 从 mDNS 记录中取出服务端信息。协议版本不同、指纹缺失或没有 IPv4 地址的忽略。
+/// 从 mDNS 记录中取出服务端信息。格式标记不同、指纹缺失或没有 IPv4 地址的忽略。
 fn parse(info: &mdns_sd::ResolvedService) -> Option<Discovered> {
-    if info.get_property_val_str(TXT_VERSION)? != PROTOCOL_VERSION.to_string() {
+    if info.get_property_val_str(TXT_VERSION)? != WIRE_FORMAT.to_string() {
         return None;
     }
     let fingerprint = info.get_property_val_str(TXT_FINGERPRINT)?.parse().ok()?;

@@ -316,6 +316,8 @@ where
         }))?;
         let local = displays.displays()?;
         let rect = bounds(&local).ok_or(Error::NoDisplays("本机"))?;
+        let mut neighbors = Neighbors::new(rect);
+        neighbors.set_local_screens(&screens(&local));
         let (arrivals_tx, arrivals) = mpsc::channel(64);
         let shared = Arc::new(Shared {
             capabilities: capabilities(config.clipboard, config.command_key),
@@ -341,7 +343,7 @@ where
             clipboard: Arc::new(Mutex::new(clipboard)),
             events,
             local,
-            neighbors: Neighbors::new(rect),
+            neighbors,
             sessions: HashMap::new(),
             pressed: Pressed::new(),
             broken: Vec::new(),
@@ -430,6 +432,7 @@ where
         };
         let scale = relative_scale(&self.local, &remote);
         self.neighbors.insert(id, place, remote_rect, scale);
+        self.neighbors.set_remote_screens(id, &screens(&remote));
         self.apply_pointer(id, &settings, mouse_dpi);
         let caps = welcome.capabilities;
         let keys = Keys {
@@ -527,10 +530,20 @@ where
                 if let Some(rect) = bounds(&session.remote) {
                     let scale = relative_scale(&self.local, &session.remote);
                     self.neighbors.set_remote(id, rect, scale);
+                    self.neighbors
+                        .set_remote_screens(id, &screens(&session.remote));
                     info!(peer = %mark::device(&session.name), remote = ?rect, "对方的显示器布局已更新");
                 }
             }
             Message::DropHint(hint) => self.config.edge.remote(session.peer, Some(hint)),
+            Message::InputBlocked => {
+                info!(peer = %mark::device(&session.name), "对方暂时收不了键鼠（锁屏、权限提示或管理员窗口），光标回到本机");
+                if self.neighbors.active() == Some(id)
+                    && let Some((id, t)) = self.neighbors.leave()
+                {
+                    self.perform(id, t, false);
+                }
+            }
             Message::OpenSettings => {
                 info!(peer = %mark::device(&session.name), "对方请本机打开设置界面");
                 self.config
@@ -793,6 +806,7 @@ where
         self.local = now;
         *self.shared.local() = self.local.clone();
         self.neighbors.set_local(rect);
+        self.neighbors.set_local_screens(&screens(&self.local));
         info!(local = ?rect, "本机的显示器布局已更新");
         let ids: Vec<u64> = self.sessions.keys().copied().collect();
         for id in ids {
@@ -1132,6 +1146,7 @@ async fn run_session(
                         message @ (Message::Displays(_)
                         | Message::DropHint(_)
                         | Message::OpenSettings
+                        | Message::InputBlocked
                         | Message::AppInfo { .. }),
                     ) => {
                         let _ = arrivals.send(Arrival::Message { id, message }).await;
@@ -1203,6 +1218,11 @@ async fn expect_displays(framed: &mut Framed<ServerStream>) -> Result<Vec<Displa
 }
 
 /// 本机移动一个坐标单位，对方移动多少个坐标单位（百分数）。
+/// 各块显示器的范围。
+fn screens(displays: &[Display]) -> Vec<Rect> {
+    displays.iter().map(|d| d.bounds).collect()
+}
+
 fn relative_scale(local: &[Display], remote: &[Display]) -> u16 {
     let ratio = u32::from(primary_scale(remote)) * 100 / u32::from(primary_scale(local));
     u16::try_from(ratio).unwrap_or(u16::MAX)

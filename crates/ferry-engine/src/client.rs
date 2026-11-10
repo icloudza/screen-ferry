@@ -46,6 +46,9 @@ use crate::pairing::{self, ConfirmPairing, Outcome};
 
 /// 两次连接尝试之间的间隔。
 const RETRY_DELAY: Duration = Duration::from_secs(1);
+/// 光标不归对方控制时，多久看一眼本机自己的鼠标：没按键时、按着键时。
+const LOCAL_POINTER_IDLE: Duration = Duration::from_millis(100);
+const LOCAL_POINTER_HELD: Duration = Duration::from_millis(16);
 /// 超过这么久收不到任何消息（服务端至少每 0.5 秒发一次 Ping），视为断线。
 const SILENCE_TIMEOUT: Duration = Duration::from_secs(2);
 /// 每轮在局域网里寻找服务端的时长。
@@ -527,16 +530,12 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
                 });
             }
         };
-        // 上次因安全桌面或注入失败断开时，先等桌面恢复，再松开尚未成功释放的键。
-        // 不可用期间不建立新会话，避免控制端反复切入一个无法接受输入的桌面。
-        let ready = self
-            .inject
-            .check_available()
-            .map_err(Error::from)
-            .and_then(|()| self.release_all());
-        if let Err(e) = ready {
-            report(Some(DialError::of(&e)));
-            return Err(e);
+        // 上次没能松开的键，桌面可用就现在松开；还不可用（锁屏、权限提示、管理员窗口）就留着，
+        // 等恢复后再松。连接照常建立：剪贴板和文件不受影响，光标要过来时再拒绝。
+        if self.inject.check_available().is_ok()
+            && let Err(e) = self.release_all()
+        {
+            warn!("松开按键失败，稍后重试：{e}");
         }
         if target.via != Via::Remembered
             && let Some(&addr) = target.addrs.first()
@@ -668,6 +667,24 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
         let mut slowest_injection = Duration::ZERO;
         let mut hints = self.edge.hints();
         hints.mark_unchanged();
+        // 本机收不了键鼠时，请控制端把光标收回去，连接保持；对方不认识这条消息（旧版本）时只能结束会话。
+        // 安全输入会话里一切失败都照旧结束会话。
+        let can_refuse =
+            !self.secure_input && welcome.capabilities.contains(Capabilities::INPUT_BLOCKED);
+        // 已经请控制端收回光标、还没等到它的 Leave：这期间到的键鼠一律丢掉。
+        let mut refusing = false;
+        // 光标不归对方控制时，本机用户可能正用自己的鼠标往边缘拖文件：隔一会儿看一眼本机鼠标，
+        // 按着键时看得勤一些，胶囊才跟得上手。
+        let mut local_wait = LOCAL_POINTER_IDLE;
+        macro_rules! refuse {
+            ($error:expr) => {{
+                if !refusing {
+                    warn!("本机暂时收不了键鼠，请控制端收回光标：{}", $error);
+                    send(&mut framed, &Message::InputBlocked).await?;
+                    refusing = true;
+                }
+            }};
+        }
         loop {
             let message = tokio::select! {
                 data = &mut data_connection, if data_pending => {
@@ -683,6 +700,21 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
                     continue;
                 }
                 message = framed.recv() => message?,
+                () = sleep(local_wait), if self.drop_files && !self.secure_input && !*self.active.borrow() => {
+                    local_wait = LOCAL_POINTER_IDLE;
+                    if let Some((at, held)) = self.inject.local_pointer() {
+                        if held {
+                            local_wait = LOCAL_POINTER_HELD;
+                        }
+                        self.edge.pointer(|p| {
+                            p.x = at.x as f32;
+                            p.y = at.y as f32;
+                            p.held = held;
+                            p.here = true;
+                        });
+                    }
+                    continue;
+                }
                 Some(command) = next_command(&mut self.commands) => {
                     match command {
                         ClientCommand::OpenPeerSettings => {
@@ -747,8 +779,25 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
                     continue;
                 }
                 _ = silence.tick() => {
-                    // 即使光标在控制端，也给特权输入代理保活；没有输入时仍能发现服务故障。
-                    self.inject.check_available()?;
+                    let here = *self.active.borrow();
+                    if self.secure_input {
+                        // 即使光标在控制端，也给特权输入代理保活；没有输入时仍能发现服务故障。
+                        self.inject.check_available()?;
+                    } else if here {
+                        // 光标在本机时才看：弹出权限提示、锁屏或切到管理员窗口后，没有新输入也要归还控制。
+                        if let Err(e) = self.inject.check_available() {
+                            if !can_refuse {
+                                return Err(e.into());
+                            }
+                            refuse!(e);
+                        }
+                    } else if !self.pressed.is_empty()
+                        && self.inject.check_available().is_ok()
+                        && let Err(e) = self.release_all()
+                    {
+                        // 归还控制时没能松开的键，桌面恢复后补上。
+                        debug!("补发松开按键失败，稍后重试：{e}");
+                    }
                     if self.secure_input {
                         let next = self.inject.remote_challenge(*server.as_bytes())?.ok_or(Error::Protocol("安全输入授权丢失"))?;
                         if challenge != Some(next) {
@@ -800,10 +849,21 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
                     }
                 }
                 Some(Message::Enter(enter)) => {
-                    self.inject.check_available()?;
-                    self.release_all()?;
                     // 先把光标移到入口再显示，免得它先在藏身处闪一下。
-                    self.move_to(enter.position)?;
+                    let entered = self
+                        .inject
+                        .check_available()
+                        .map_err(Error::from)
+                        .and_then(|()| self.release_all())
+                        .and_then(|()| self.move_to(enter.position));
+                    match entered {
+                        Ok(()) => {}
+                        Err(e @ Error::Platform(_)) if can_refuse => {
+                            refuse!(e);
+                            continue;
+                        }
+                        Err(e) => return Err(e),
+                    }
                     self.hide_cursor(false);
                     // 只同步 Caps Lock：对方可能没有 Num Lock（例如 Mac），同步它会误关本机的小键盘。
                     if !self.secure_input
@@ -821,7 +881,14 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
                     });
                 }
                 Some(Message::Leave { .. }) => {
-                    self.release_all()?;
+                    refusing = false;
+                    if let Err(e) = self.release_all() {
+                        if self.secure_input {
+                            return Err(e);
+                        }
+                        // 控制端已经收回光标；松不开的键留着，桌面恢复后补发。
+                        warn!("松开按键失败，桌面恢复后重试：{e}");
+                    }
                     self.hide_cursor(true);
                     self.active.send_replace(false);
                     self.edge.pointer(|p| p.here = false);
@@ -833,8 +900,18 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
                     });
                 }
                 Some(Message::Input(event)) => {
+                    if refusing {
+                        continue;
+                    }
                     let started = Instant::now();
-                    self.apply(event)?;
+                    match self.apply(event) {
+                        Ok(()) => {}
+                        Err(e @ Error::Platform(_)) if can_refuse => {
+                            refuse!(e);
+                            continue;
+                        }
+                        Err(e) => return Err(e),
+                    }
                     applied_inputs += 1;
                     slowest_injection = slowest_injection
                         .max(verified_injection.unwrap_or_else(|| started.elapsed()));

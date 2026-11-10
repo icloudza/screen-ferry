@@ -9,9 +9,6 @@ publish.workspace = true
 [lib]
 test = false
 
-[features]
-experimental-secure-input = ["ferry-platform-windows/experimental-secure-input"]
-
 [[bin]]
 name = "screenferry-service"
 path = "src/main.rs"

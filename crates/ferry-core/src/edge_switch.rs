@@ -50,6 +50,10 @@ pub struct EdgeSwitch {
     remote_at: Option<Point>,
     /// 换算后不足一个单位的余数，累积到下一次。
     carry: (i64, i64),
+    /// 本机和远端各块显示器的范围；为空时把整台设备当作一个矩形。
+    /// 显示器大小不一时外接矩形里有没有屏幕的空白：进出按真正贴着切换边缘的那几块对齐，光标也不走进空白。
+    local_screens: Vec<Rect>,
+    remote_screens: Vec<Rect>,
 }
 
 impl EdgeSwitch {
@@ -66,6 +70,21 @@ impl EdgeSwitch {
             seq: 0,
             remote_at: None,
             carry: (0, 0),
+            local_screens: Vec::new(),
+            remote_screens: Vec::new(),
+        }
+    }
+
+    /// 本机各块显示器的范围。进出时沿边缘的位置按贴着切换边缘的那几块换算。
+    pub fn set_local_screens(&mut self, screens: &[Rect]) {
+        self.local_screens = screens.to_vec();
+    }
+
+    /// 远端各块显示器的范围。光标在远端时不会走进没有屏幕的空白，已经在空白里的挪到最近的屏幕上。
+    pub fn set_remote_screens(&mut self, screens: &[Rect]) {
+        self.remote_screens = screens.to_vec();
+        if let Some(at) = self.remote_at {
+            self.remote_at = Some(nearest(at, &self.remote_screens));
         }
     }
 
@@ -165,13 +184,14 @@ impl EdgeSwitch {
             Side::Top => i64::from(l.y) - y,
         };
         let depth = (self.to_remote(beyond) - 1).max(INSET);
+        let (le, re) = (self.local_edge(), self.remote_edge());
         let at = match self.side {
-            Side::Right => Point::new(offset(r.x, depth), along_y(position.y, l, r)),
-            Side::Left => Point::new(offset(r.right() - 1, -depth), along_y(position.y, l, r)),
-            Side::Bottom => Point::new(along_x(position.x, l, r), offset(r.y, depth)),
-            Side::Top => Point::new(along_x(position.x, l, r), offset(r.bottom() - 1, -depth)),
+            Side::Right => Point::new(offset(r.x, depth), along_y(position.y, le, re)),
+            Side::Left => Point::new(offset(r.right() - 1, -depth), along_y(position.y, le, re)),
+            Side::Bottom => Point::new(along_x(position.x, le, re), offset(r.y, depth)),
+            Side::Top => Point::new(along_x(position.x, le, re), offset(r.bottom() - 1, -depth)),
         };
-        let at = clamp_into(at, r);
+        let at = nearest(clamp_into(at, r), &self.remote_screens);
         self.seq = self.seq.wrapping_add(1);
         self.remote_at = Some(at);
         self.carry = (0, 0);
@@ -203,6 +223,15 @@ impl EdgeSwitch {
             x.clamp(i64::from(r.x), i64::from(r.right() - 1)) as i32,
             y.clamp(i64::from(r.y), i64::from(r.bottom() - 1)) as i32,
         );
+        // 没有屏幕的空白进不去：被光标所在那块屏幕的边挡住，沿着边滑。被空白挡住时也回不了本机。
+        let next = if on_screen(next, &self.remote_screens) {
+            next
+        } else {
+            self.remote_screens
+                .iter()
+                .find(|s| s.contains(at))
+                .map_or(at, |&s| clamp_into(next, s))
+        };
 
         // 从朝向本机的边缘推出去多远。
         let beyond = match self.side {
@@ -274,14 +303,25 @@ impl EdgeSwitch {
 
     /// 回到本机时光标的位置：沿边缘与远端位置 `at` 对齐，离边缘 `depth` 个单位。
     fn local_point(&self, at: Point, depth: i64) -> Point {
-        let (l, r) = (self.local, self.remote);
+        let l = self.local;
+        let (le, re) = (self.local_edge(), self.remote_edge());
         let p = match self.side {
-            Side::Right => Point::new(offset(l.right() - 1, -depth), along_y(at.y, r, l)),
-            Side::Left => Point::new(offset(l.x, depth), along_y(at.y, r, l)),
-            Side::Bottom => Point::new(along_x(at.x, r, l), offset(l.bottom() - 1, -depth)),
-            Side::Top => Point::new(along_x(at.x, r, l), offset(l.y, depth)),
+            Side::Right => Point::new(offset(l.right() - 1, -depth), along_y(at.y, re, le)),
+            Side::Left => Point::new(offset(l.x, depth), along_y(at.y, re, le)),
+            Side::Bottom => Point::new(along_x(at.x, re, le), offset(l.bottom() - 1, -depth)),
+            Side::Top => Point::new(along_x(at.x, re, le), offset(l.y, depth)),
         };
         clamp_into(p, l)
+    }
+
+    /// 本机这一段里，真正贴着切换边缘的那部分。
+    fn local_edge(&self) -> Rect {
+        narrow(self.local, self.side, &self.local_screens)
+    }
+
+    /// 远端朝向本机的那条边上，真正有屏幕贴着的那部分。
+    fn remote_edge(&self) -> Rect {
+        narrow(self.remote, self.side.opposite(), &self.remote_screens)
     }
 
     /// 换算比例：本机移动 1 个单位，远端移动 `分子 / 分母` 个单位。
@@ -318,6 +358,71 @@ fn is_empty(r: Rect) -> bool {
 /// 从 `edge` 移动 `by` 个单位，超出 `i32` 时取边界值。
 fn offset(edge: i32, by: i64) -> i32 {
     (i64::from(edge) + by).clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32
+}
+
+/// `p` 是否落在某块屏幕上。不知道各块屏幕时（`screens` 为空）都算在。
+fn on_screen(p: Point, screens: &[Rect]) -> bool {
+    screens.is_empty() || screens.iter().any(|s| s.contains(p))
+}
+
+/// `p` 不在任何一块屏幕上时，挪到离它最近的屏幕上。
+fn nearest(p: Point, screens: &[Rect]) -> Point {
+    if on_screen(p, screens) {
+        return p;
+    }
+    screens
+        .iter()
+        .filter(|s| !is_empty(**s))
+        .map(|&s| clamp_into(p, s))
+        .min_by_key(|q| {
+            let (dx, dy) = (
+                i64::from(q.x) - i64::from(p.x),
+                i64::from(q.y) - i64::from(p.y),
+            );
+            dx * dx + dy * dy
+        })
+        .unwrap_or(p)
+}
+
+/// 把 `rect` 沿 `side` 那条边收窄到真正贴着这条边的屏幕：`screens` 里贴着它们外接矩形 `side` 一侧的那几块。
+/// 不知道各块屏幕、或者收窄后和 `rect` 没有重叠时，原样返回。
+fn narrow(rect: Rect, side: Side, screens: &[Rect]) -> Rect {
+    let screens: Vec<Rect> = screens.iter().copied().filter(|s| !is_empty(*s)).collect();
+    let edge_of = |s: &Rect| match side {
+        Side::Left => i64::from(s.x),
+        Side::Right => -i64::from(s.right()),
+        Side::Top => i64::from(s.y),
+        Side::Bottom => -i64::from(s.bottom()),
+    };
+    let Some(outer) = screens.iter().map(edge_of).min() else {
+        return rect;
+    };
+    let touching = screens.iter().filter(|s| edge_of(s) == outer);
+    let vertical = matches!(side, Side::Left | Side::Right);
+    let (mut start, mut end) = (i32::MAX, i32::MIN);
+    for s in touching {
+        let (a, b) = if vertical {
+            (s.y, s.bottom())
+        } else {
+            (s.x, s.right())
+        };
+        start = start.min(a);
+        end = end.max(b);
+    }
+    let (from, to) = if vertical {
+        (rect.y, rect.bottom())
+    } else {
+        (rect.x, rect.right())
+    };
+    let (start, end) = (start.max(from), end.min(to));
+    if start >= end {
+        return rect;
+    }
+    if vertical {
+        Rect::new(rect.x, start, rect.width, end.abs_diff(start))
+    } else {
+        Rect::new(start, rect.y, end.abs_diff(start), rect.height)
+    }
 }
 
 fn clamp_into(p: Point, r: Rect) -> Point {

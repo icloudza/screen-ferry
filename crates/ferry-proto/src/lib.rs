@@ -30,7 +30,7 @@ pub use edge::{DropHint, HintState};
 pub use error::{DecodeError, EncodeError};
 pub use file::{EntryKind, FileCancel, FileEnd, FileEntry, FileList, FileOffer, FileResume};
 pub use handshake::{
-    Bye, ByeReason, Capabilities, Channel, Hello, PROTOCOL_VERSION, Reject, RejectReason, Welcome,
+    Bye, ByeReason, Capabilities, Channel, Hello, Reject, RejectReason, WIRE_FORMAT, Welcome,
 };
 pub use message::Message;
 pub use screen::Enter;

@@ -1,6 +1,6 @@
 # 线协议
 
-- 当前版本：**2**（新增代理独立验证的签署输入，两端须一起更新；普通构建仍关闭实验 UAC 服务）
+- 没有单独的协议版本：协议跟着软件走，软件只有一个版本号。新旧版本靠能力位协商互连（第 3、7 节）。
 - 实现：`crates/ferry-proto`
 - 测试：`crates/ferry-proto/tests/suite/`；fuzz：`fuzz/fuzz_targets/decode.rs`
 
@@ -38,7 +38,7 @@
   |---|---|
   | `fp` | 证书指纹，64 位小写十六进制 |
   | `name` | 设备名 |
-  | `v` | 协议版本，十进制 |
+  | `v` | 格式标记，固定为 `1` |
 
 - 广播内容不受保护，只用来找到地址。发起方连上后必须核对 TLS 证书的指纹与 `fp` 一致，不一致即放弃这台，也不对它发起配对。
 - 发起方优先选择指纹在信任列表中的设备；信任列表为空、且局域网里恰好只有一台时才自动选它（随后照常配对）。`v` 与本机不同的记录忽略。
@@ -76,7 +76,8 @@
 
 - 每条连接的第一条消息必须是 `Hello`，接受方以 `Welcome` 或 `Reject` 回应。握手完成前，除这三条和 `Bye` 外的消息都是协议违规。
 - 先建立输入连接，拿到会话号 `S`；数据连接和文件连接带上 `S`，接受方据此把它们归到同一会话。
-- **版本**：双方版本必须相同，否则接受方回 `Reject(INCOMPATIBLE_VERSION)`，并带上自己的版本号，便于提示用户升级哪一端。
+- **格式标记**：`Hello`、`Welcome`、`Reject` 开头的 `format` 固定为 `1`（实现里是 `WIRE_FORMAT`）。它不随软件版本变化，也不是功能开关；
+  已发布的版本要求双方相等，不等时接受方回 `Reject(INCOMPATIBLE_FORMAT)`。新功能不动它，只加能力位。
 - **能力**：`Welcome` 中的能力是双方能力的交集。只能发送已协商能力范围内的消息：
   - `PointerDelta` 需要 `RELATIVE_POINTER`
   - 剪贴板消息需要 `CLIPBOARD`
@@ -84,10 +85,11 @@
   - `PeerSide`、`DropHint` 需要 `EDGE_DROP`
   - `OpenSettings` 需要 `REMOTE_SETTINGS`
   - `AppInfo` 需要 `APP_INFO`：输入连接握手后，双方各发一次自己的程序版本（ADR 0014）
+  - `InputBlocked` 需要 `INPUT_BLOCKED`（bit 8）：被控端收不了键鼠时请控制端收回光标，连接保持。对方没有这项能力时，被控端只能结束会话。
   - `SecureChallenge`、`SecureInput` 需要 `SECURE_INPUT`（bit 7）：只有管理员另行授权远端的被控端才声明此能力。
 - `COMMAND_KEY` 说明发送方的快捷键以 Command 键为主（macOS），不是一项能力。服务端看客户端 `Hello` 里的这一位：
   两边一个是一个不是时，才按设置互换 Command 与 Ctrl。不认识这一位的旧版客户端都是 Windows，结果不变。
-- `Hello`、`Welcome`、`Reject` 的消息体格式在所有版本中永久不变，版本不同的双方也总能完成协商。
+- `Hello`、`Welcome`、`Reject` 的消息体格式永久不变，新旧版本的双方总能完成协商。
 - 配对连接的 `Hello` 中 `session` 填 0，`capabilities` 不起作用。
 - 邀请连接的 `Hello` 中 `session` 是服务端的监听端口，`capabilities` 不起作用。
 
@@ -121,9 +123,9 @@
 
 | 类型号 | 消息 | 连接 | 消息体 |
 |---|---|---|---|
-| `0x0001` | Hello | 两者 | `version u16` · `channel u8` · `capabilities u64` · `session u64` · `name str` |
-| `0x0002` | Welcome | 两者 | `version u16` · `capabilities u64` · `session u64` · `name str` |
-| `0x0003` | Reject | 两者 | `reason u16` · `version u16` |
+| `0x0001` | Hello | 两者 | `format u16` · `channel u8` · `capabilities u64` · `session u64` · `name str` |
+| `0x0002` | Welcome | 两者 | `format u16` · `capabilities u64` · `session u64` · `name str` |
+| `0x0003` | Reject | 两者 | `reason u16` · `format u16` |
 | `0x0004` | Bye | 两者 | `reason u16` |
 | `0x0005` | Ping | 两者 | `nonce u64` |
 | `0x0006` | Pong | 两者 | `nonce u64` |
@@ -139,6 +141,7 @@
 | `0x0106` | AppInfo | 输入 | `version str`，最多 64 字节 |
 | `0x0107` | SecureChallenge | 输入 | `nonce [32]`，需要 `SECURE_INPUT` |
 | `0x0108` | SecureInput | 输入 | `challenge [32]` · `sequence u64` · `body [32]` · `signature [64]`，需要 `SECURE_INPUT` |
+| `0x0109` | InputBlocked | 输入 | 空，需要 `INPUT_BLOCKED`；被控端发给控制端 |
 | `0x0110` | Key | 输入 | `code u32` · `action u8` |
 | `0x0120` | PointerMotion | 输入 | `position Point` |
 | `0x0121` | PointerDelta | 输入 | `dx i32` · `dy i32` |
@@ -175,7 +178,7 @@
 | 字段 | 取值 |
 |---|---|
 | `channel` | 1 输入，2 数据，3 配对，4 文件，5 邀请 |
-| `capabilities` | 位 0 `RELATIVE_POINTER`，位 1 `CLIPBOARD`，位 2 `FILES`，位 3 `EDGE_DROP`，位 4 `COMMAND_KEY`，位 5 `REMOTE_SETTINGS`，位 6 `APP_INFO`；未知位保留，协商时自然被交集去掉 |
+| `capabilities` | 位 0 `RELATIVE_POINTER`，位 1 `CLIPBOARD`，位 2 `FILES`，位 3 `EDGE_DROP`，位 4 `COMMAND_KEY`，位 5 `REMOTE_SETTINGS`，位 6 `APP_INFO`，位 7 `SECURE_INPUT`，位 8 `INPUT_BLOCKED`；未知位保留，协商时自然被交集去掉 |
 | `side` | 1 左，2 右，3 上，4 下 |
 | DropHint `state` | 0 收起，1 靠近，2 在胶囊上 |
 | `along` | 沿相邻那条边的位置，0–10000（左右边从上往下，上下边从左往右） |
@@ -190,7 +193,7 @@
 | `Wheel.dx/dy` | 一格 = 120；高精度滚动可以是它的分数 |
 | `scale_percent` | 一个逻辑单位等于多少个坐标单位（百分数）：Windows 为系统缩放比例，macOS 恒为 100。双方按 `对方 / 本机` 换算移动距离 |
 | `format` | 1 纯文本（UTF-8，换行统一为 `\n`），2 HTML（UTF-8），3 RTF，4 PNG |
-| Reject `reason` | 1 版本不兼容，2 会话不存在，3 正被其他设备控制，4 尚未配对 |
+| Reject `reason` | 1 格式标记不同，2 会话不存在，3 正被其他设备控制，4 尚未配对 |
 | Bye `reason` | 0 正常关闭，1 被新连接取代，2 协议违规，3 心跳超时 |
 | Cancel、FileCancel `reason` | 0 主动取消，1 内容已过期，2 超过大小上限，3 源数据不可用 |
 
@@ -212,7 +215,7 @@
 
 所有坐标都使用**接收方**的桌面坐标系：macOS 为点（point），Windows 为物理像素。接收方用 `Displays` 声明自己的坐标系。会话中途显示器布局变了（改分辨率、缩放、插拔显示器）时再发一次 `Displays`，对方以最新的一份为准。`Button` 和 `Wheel` 带上当时的光标位置，接收方先移动光标再执行。
 
-### 签署输入（版本 2）
+### 签署输入（需要 `SECURE_INPUT`）
 
 `0x0107 SecureChallenge` 的消息体为随机数 `[32]`；`0x0108 SecureInput` 为
 `challenge [32] · sequence u64 · body [32] · signature [64]`，只能出现在输入连接。
@@ -309,10 +312,14 @@ A（接受方）                                  B（发起方）
 
 ## 7. 演进规则
 
+目标：任意两个已发布的版本都能互连，功能取双方都会的那部分。
+
 1. 已发布消息的消息体格式不改。需要新字段时，定义新的消息类型。
-2. 新的消息类型必须由新的能力位控制。对方没有声明这个能力时，就不发这类消息。
-3. 不兼容的变化（改帧格式、改已有消息）必须递增 `PROTOCOL_VERSION`。
-4. 类型号一经分配不再复用；废弃的类型号保留不用。
+2. 新的消息类型必须由新的能力位控制。对方没有声明这个能力时，就不发这类消息；收到未协商的消息按协议违规处理。
+3. 新能力必须有不依赖它的退路：对方没有时，功能关掉或退回旧的做法，不能因此连不上。
+4. 能力位和类型号一经分配不再复用、不改含义；废弃的保留不用。不认识的能力位原样保留，协商时自然被交集去掉。
+5. 帧格式、`Hello`、`Welcome`、`Reject` 和格式标记 `1` 不改。它们一变，所有旧版本都连不上；
+   真到非改不可的那天，才把格式标记加一，并在更新说明里写明两台要一起更新。
 
 ## 8. 与 Deskflow 的主要差异
 
@@ -323,4 +330,4 @@ A（接受方）                                  B（发起方）
 | 按键 | X11 keysym + 修饰键掩码 + 按键号 | USB HID 物理键，修饰键独立传输 |
 | 剪贴板 | 进入屏幕时推送完整内容 | 先通告，粘贴时再按格式拉取，可取消 |
 | 心跳 | 固定间隔保活 | `Ping`/`Pong` 带往返时间，频率由引擎按状态调整 |
-| 版本兼容 | 主次版本号 | 版本号 + 能力位协商 |
+| 版本兼容 | 主次版本号 | 能力位协商，没有单独的协议版本 |

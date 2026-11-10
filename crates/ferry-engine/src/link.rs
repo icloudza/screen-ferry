@@ -19,7 +19,8 @@ pub(crate) fn capabilities(clipboard: bool, command_key: bool) -> Capabilities {
         | Capabilities::EDGE_DROP
         | Capabilities::REMOTE_SETTINGS
         | Capabilities::APP_INFO
-        | Capabilities::SECURE_INPUT;
+        | Capabilities::SECURE_INPUT
+        | Capabilities::INPUT_BLOCKED;
     if clipboard {
         caps |= Capabilities::CLIPBOARD;
     }

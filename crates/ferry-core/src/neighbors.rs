@@ -33,6 +33,8 @@ struct Neighbor {
 /// 本机四周的邻居。
 pub struct Neighbors {
     local: Rect,
+    /// 本机各块显示器的范围；为空时把本机当作一个矩形。
+    local_screens: Vec<Rect>,
     list: Vec<Neighbor>,
     /// 光标所在的邻居。
     active: Option<u64>,
@@ -44,6 +46,7 @@ impl Neighbors {
     pub fn new(local: Rect) -> Self {
         Self {
             local,
+            local_screens: Vec::new(),
             list: Vec::new(),
             active: None,
             joined: 0,
@@ -58,11 +61,13 @@ impl Neighbors {
             self.active = None;
         }
         self.joined += 1;
+        let mut switch = EdgeSwitch::new(self.local, remote, place.side, scale_percent);
+        switch.set_local_screens(&self.local_screens);
         self.list.push(Neighbor {
             id,
             place,
             joined: self.joined,
-            switch: EdgeSwitch::new(self.local, remote, place.side, scale_percent),
+            switch,
             segment: self.local,
             scale: scale_percent,
         });
@@ -101,6 +106,21 @@ impl Neighbors {
     pub fn set_local(&mut self, local: Rect) {
         self.local = local;
         self.arrange();
+    }
+
+    /// 本机各块显示器的范围。显示器大小不一时，进出按真正贴着切换边缘的那几块对齐。
+    pub fn set_local_screens(&mut self, screens: &[Rect]) {
+        self.local_screens = screens.to_vec();
+        for neighbor in &mut self.list {
+            neighbor.switch.set_local_screens(screens);
+        }
+    }
+
+    /// 一台邻居各块显示器的范围。光标在它上面时不会走进没有屏幕的空白。
+    pub fn set_remote_screens(&mut self, id: u64, screens: &[Rect]) {
+        if let Some(neighbor) = self.find_mut(id) {
+            neighbor.switch.set_remote_screens(screens);
+        }
     }
 
     /// 一台邻居的屏幕或缩放比例变了。

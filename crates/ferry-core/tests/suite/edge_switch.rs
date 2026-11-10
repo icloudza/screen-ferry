@@ -584,3 +584,65 @@ fn changing_delay_or_remote_geometry_restarts_the_return_wait() {
         Some(Transition::Leave { .. })
     ));
 }
+
+/// 两台电脑各有一大一小两块屏幕：B 主屏 1920×1080、右边一块竖屏 1080×1920；
+/// A 在 B 左边，主屏 4096×2160、右边一块 1920×1080 的副屏，顶部对齐。
+fn uneven() -> EdgeSwitch {
+    let mut s = EdgeSwitch::new(
+        Rect::new(0, 0, 3000, 1920),
+        Rect::new(0, 0, 6016, 2160),
+        Side::Left,
+        100,
+    );
+    s.set_local_screens(&[Rect::new(0, 0, 1920, 1080), Rect::new(1920, 0, 1080, 1920)]);
+    s.set_remote_screens(&[Rect::new(0, 0, 4096, 2160), Rect::new(4096, 0, 1920, 1080)]);
+    s
+}
+
+#[test]
+fn entering_lands_on_the_screen_that_touches_the_edge() {
+    // 从 B 主屏左边缘的最下面推出去：落在 A 副屏右边缘的最下面，而不是副屏下方没有屏幕的空白。
+    let mut s = uneven();
+    let t = s.local_motion(Point::new(0, 1079), -5, 0, Instant::now());
+    let Some(Transition::Enter { at, .. }) = t else {
+        panic!("应当进入远端：{t:?}");
+    };
+    assert!(Rect::new(4096, 0, 1920, 1080).contains(at), "{at:?}");
+    assert_eq!(at.y, 1079);
+}
+
+#[test]
+fn the_cursor_slides_along_a_screen_instead_of_entering_a_gap() {
+    let mut s = uneven();
+    s.local_motion(Point::new(0, 1000), -5, 0, Instant::now());
+    // 在 A 副屏上往下推：停在副屏的下边，不进空白。
+    s.remote_motion(0, 500, true, Instant::now());
+    assert_eq!(s.remote_position().map(|p| p.y), Some(1079));
+    // 斜着推：横向照走，纵向被挡住。
+    s.remote_motion(-100, 50, true, Instant::now());
+    let at = s.remote_position().unwrap();
+    assert_eq!(at.y, 1079);
+    assert!(Rect::new(4096, 0, 1920, 1080).contains(at));
+    // 往左走到 A 主屏上，就能到下半部分。
+    s.remote_motion(-3000, 0, true, Instant::now());
+    s.remote_motion(0, 900, true, Instant::now());
+    let at = s.remote_position().unwrap();
+    assert!(at.x < 4096 && at.y > 1080, "{at:?}");
+    // 在主屏下半部分往右推：被副屏下方的空白挡住，回不了本机。
+    let t = s.remote_motion(9000, 0, true, Instant::now());
+    assert!(!matches!(t, Some(Transition::Leave { .. })));
+    assert_eq!(s.remote_position().map(|p| p.x), Some(4095));
+}
+
+#[test]
+fn leaving_maps_back_onto_the_local_screen_that_touches_the_edge() {
+    let mut s = uneven();
+    s.local_motion(Point::new(0, 540), -5, 0, Instant::now());
+    s.remote_motion(0, 539, true, Instant::now());
+    // 从 A 副屏右边缘最下面回来：回到 B 主屏左边缘最下面。
+    let t = s.remote_motion(9000, 0, true, Instant::now());
+    let Some(Transition::Leave { local_at, .. }) = t else {
+        panic!("应当回到本机：{t:?}");
+    };
+    assert_eq!(local_at.y, 1079);
+}

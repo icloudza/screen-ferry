@@ -1,7 +1,7 @@
-//! 握手：协议版本、连接类型、能力协商，以及拒绝与告别。
+//! 握手：格式标记、连接类型、能力协商，以及拒绝与告别。
 //!
 //! 每条连接建立后，发起方先发 [`Hello`]；接受方回 [`Welcome`] 或 [`Reject`]。
-//! 这三条消息的格式在所有协议版本中保持不变，版本不同的双方也总能完成协商。
+//! 这三条消息的格式永久不变，新旧版本的双方总能完成协商。
 
 use std::fmt;
 
@@ -11,8 +11,12 @@ use crate::error::{DecodeError, EncodeError};
 use crate::limits::MAX_NAME_LEN;
 use crate::wire::{Body, Reader, Writer};
 
-/// 当前协议版本。线上格式有任何不兼容的变化都必须递增。
-pub const PROTOCOL_VERSION: u16 = 2;
+/// 握手开头的格式标记，固定为 1，不要改。
+///
+/// 它不是一个会演进的“协议版本”：软件只有一个版本号，新功能一律用能力位协商（见 [`Capabilities`]），
+/// 新旧版本因此总能互连。已经发布的版本握手时要求这个值相等，局域网广播里也带着它，
+/// 改掉它就等于让所有旧版本连不上。只有帧格式或握手本身不得不变时才动它，那时两台必须一起更新。
+pub const WIRE_FORMAT: u16 = 1;
 
 /// 连接类型。每对设备之间各有一条。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -65,13 +69,16 @@ bitflags! {
         const APP_INFO = 1 << 6;
         /// 代理独立验证由控制端设备私钥签署的输入。
         const SECURE_INPUT = 1 << 7;
+        /// 被控端收不了键鼠时请控制端收回光标（`InputBlocked` 消息），不必断开连接。
+        const INPUT_BLOCKED = 1 << 8;
     }
 }
 
 /// 发起方的问候。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Hello {
-    pub version: u16,
+    /// 格式标记，见 [`WIRE_FORMAT`]。
+    pub format: u16,
     pub channel: Channel,
     pub capabilities: Capabilities,
     /// 输入连接填 0；数据连接和文件连接填输入连接握手时拿到的会话号。
@@ -89,7 +96,7 @@ impl Hello {
         name: impl Into<String>,
     ) -> Self {
         Self {
-            version: PROTOCOL_VERSION,
+            format: WIRE_FORMAT,
             channel,
             capabilities,
             session,
@@ -97,7 +104,7 @@ impl Hello {
         }
     }
 
-    /// 作为接受方回应：检查版本，并协商出双方共同的能力。
+    /// 作为接受方回应：检查格式标记，并协商出双方共同的能力。
     ///
     /// 数据连接的会话号是否有效，需要由调用方另行检查。
     pub fn accept(
@@ -106,11 +113,11 @@ impl Hello {
         session: u64,
         name: impl Into<String>,
     ) -> Result<Welcome, Reject> {
-        if self.version != PROTOCOL_VERSION {
-            return Err(Reject::new(RejectReason::INCOMPATIBLE_VERSION));
+        if self.format != WIRE_FORMAT {
+            return Err(Reject::new(RejectReason::INCOMPATIBLE_FORMAT));
         }
         Ok(Welcome {
-            version: PROTOCOL_VERSION,
+            format: WIRE_FORMAT,
             capabilities: self.capabilities & capabilities,
             session,
             name: name.into(),
@@ -121,7 +128,8 @@ impl Hello {
 /// 接受方的欢迎。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Welcome {
-    pub version: u16,
+    /// 格式标记，见 [`WIRE_FORMAT`]。
+    pub format: u16,
     /// 协商后的能力，即双方能力的交集。
     pub capabilities: Capabilities,
     /// 本次会话号。数据连接握手时要带上它。
@@ -134,15 +142,15 @@ pub struct Welcome {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Reject {
     pub reason: RejectReason,
-    /// 接受方的协议版本，方便提示用户升级哪一端。
-    pub version: u16,
+    /// 接受方的格式标记（见 [`WIRE_FORMAT`]）。
+    pub format: u16,
 }
 
 impl Reject {
     pub const fn new(reason: RejectReason) -> Self {
         Self {
             reason,
-            version: PROTOCOL_VERSION,
+            format: WIRE_FORMAT,
         }
     }
 }
@@ -152,8 +160,8 @@ impl Reject {
 pub struct RejectReason(pub u16);
 
 impl RejectReason {
-    /// 协议版本不兼容。
-    pub const INCOMPATIBLE_VERSION: Self = Self(1);
+    /// 格式标记不同（见 [`WIRE_FORMAT`]）：两台差了一次不兼容的改动，要一起更新。
+    pub const INCOMPATIBLE_FORMAT: Self = Self(1);
     /// 数据连接带来的会话号不存在。
     pub const UNKNOWN_SESSION: Self = Self(2);
     /// 已被其他设备控制，暂不接受新连接。
@@ -220,7 +228,7 @@ impl Body for Capabilities {
 
 impl Body for Hello {
     fn encode(&self, w: &mut Writer<'_>) -> Result<(), EncodeError> {
-        w.u16(self.version);
+        w.u16(self.format);
         self.channel.encode(w)?;
         self.capabilities.encode(w)?;
         w.u64(self.session);
@@ -229,7 +237,7 @@ impl Body for Hello {
 
     fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
         Ok(Self {
-            version: r.u16()?,
+            format: r.u16()?,
             channel: Channel::decode(r)?,
             capabilities: Capabilities::decode(r)?,
             session: r.u64()?,
@@ -240,7 +248,7 @@ impl Body for Hello {
 
 impl Body for Welcome {
     fn encode(&self, w: &mut Writer<'_>) -> Result<(), EncodeError> {
-        w.u16(self.version);
+        w.u16(self.format);
         self.capabilities.encode(w)?;
         w.u64(self.session);
         w.str(&self.name, MAX_NAME_LEN, "设备名长度")
@@ -248,7 +256,7 @@ impl Body for Welcome {
 
     fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
         Ok(Self {
-            version: r.u16()?,
+            format: r.u16()?,
             capabilities: Capabilities::decode(r)?,
             session: r.u64()?,
             name: r.str(MAX_NAME_LEN, "设备名长度")?,
@@ -259,14 +267,14 @@ impl Body for Welcome {
 impl Body for Reject {
     fn encode(&self, w: &mut Writer<'_>) -> Result<(), EncodeError> {
         w.u16(self.reason.0);
-        w.u16(self.version);
+        w.u16(self.format);
         Ok(())
     }
 
     fn decode(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
         Ok(Self {
             reason: RejectReason(r.u16()?),
-            version: r.u16()?,
+            format: r.u16()?,
         })
     }
 }

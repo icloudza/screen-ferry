@@ -22,7 +22,8 @@ pub struct Manifest {
     pub published: String,
     /// 过了这个时间，这份清单就不再可信：可能有人一直给出旧清单，挡住新版本。
     pub expires: String,
-    /// 新版本的线协议版本。和本机不同时，两台要一起更新才能互连。
+    /// 新版本的握手格式标记（`ferry_proto::WIRE_FORMAT`，固定为 1）。字段名沿用已发布的清单格式。
+    /// 和本机不同时，两台要一起更新才能互连；正常情况下永远相同。
     pub protocol: u16,
     #[serde(default)]
     pub notes: Notes,

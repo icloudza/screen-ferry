@@ -76,9 +76,8 @@ chs.ServiceConfigureFailed=无法设置安全输入。请使用默认安装位�
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
-#ifdef SecureInputExperimental
+; 默认不选；升级时沿用上次的选择（UsePreviousTasks），不会自动增加权限（ADR 0015）。
 Name: "secureinput"; Description: "{cm:SecureInput}"; Flags: unchecked
-#endif
 
 [InstallDelete]
 ; 设置界面整个换新，不留旧版本的资源文件。
@@ -126,11 +125,7 @@ end;
 
 function SecureInputSelected: Boolean;
 begin
-#ifdef SecureInputExperimental
   Result := WizardIsTaskSelected('secureinput');
-#else
-  Result := False;
-#endif
 end;
 
 function HasInputService: Boolean;
@@ -156,15 +151,20 @@ begin
     Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM {#AppExe} /IM {#SettingsExe} /IM screenferry_settings.exe',
       '', SW_HIDE, ewWaitUntilTerminated, Code);
   end;
-  { 停止旧服务及其 Job 中的代理，之后才能替换服务程序。旧版没有服务时直接跳过。 }
-  ExtractTemporaryFile('{#ServiceExe}');
-  { 必须运行新安装包里的工具，不能以管理员身份执行目标目录中可能被伪造的旧程序。 }
-  if not Exec(ExpandConstant('{tmp}\{#ServiceExe}'), 'stop', '', SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then
+  { 没选安全输入、也从没装过这个服务的，下面两步都跳过：安装过程和以前完全一样，不运行服务程序。 }
+  if HasInputService or SecureInputSelected then
+    ExtractTemporaryFile('{#ServiceExe}');
+  { 停止旧服务及其 Job 中的代理，之后才能替换服务程序。
+    必须运行新安装包里的工具，不能以管理员身份执行目标目录中可能被伪造的旧程序。 }
+  if HasInputService then
   begin
-    Result := CustomMessage('ServiceStopFailed');
-    Exit;
+    if not Exec(ExpandConstant('{tmp}\{#ServiceExe}'), 'stop', '', SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then
+    begin
+      Result := CustomMessage('ServiceStopFailed');
+      Exit;
+    end;
   end;
-  { 在复制文件前验证/创建受保护的应用目录。管理工具来自当前安装包的临时解出文件。 }
+  { 在复制文件前验证/创建受保护的应用目录。 }
   if SecureInputSelected then
   begin
     if not Exec(ExpandConstant('{tmp}\{#ServiceExe}'), 'prepare "' + ExpandConstant('{app}') + '"', '', SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then
@@ -179,26 +179,27 @@ end;
 { 开着开机自启时，登记的可能还是旧的位置（例如解压版的文件夹），改成安装后的位置。 }
 procedure CurStepChanged(CurStep: TSetupStep);
 var
-  Action: String;
-  Tool: String;
   Code: Integer;
 begin
   if CurStep = ssPostInstall then
   begin
     if RegValueExists(HKCU, RunKey, '{#AppName}') then
       RegWriteStringValue(HKCU, RunKey, '{#AppName}', '"' + ExpandConstant('{app}\{#AppExe}') + '" --autostart');
+    { 服务这一步失败不让整个安装失败：键鼠共享、剪贴板和文件照常能用，只是权限提示还得在这台电脑上自己点。 }
     if SecureInputSelected then
     begin
-      Action := 'install';
-      Tool := ExpandConstant('{app}\{#ServiceExe}');
+      if not Exec(ExpandConstant('{app}\{#ServiceExe}'), 'install', '', SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then
+      begin
+        Log('安全输入服务没有装上，退出码 ' + IntToStr(Code));
+        SuppressibleMsgBox(CustomMessage('ServiceConfigureFailed'), mbError, MB_OK, IDOK);
+      end;
     end
-    else
+    else if HasInputService then
     begin
-      Action := 'remove';
-      Tool := ExpandConstant('{tmp}\{#ServiceExe}');
+      { 这次没选：去掉以前装的服务和它的授权。 }
+      if not Exec(ExpandConstant('{tmp}\{#ServiceExe}'), 'remove', '', SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then
+        Log('安全输入服务没有移除干净，退出码 ' + IntToStr(Code));
     end;
-    if not Exec(Tool, Action, '', SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then
-      RaiseException(CustomMessage('ServiceConfigureFailed'));
   end;
 end;
 

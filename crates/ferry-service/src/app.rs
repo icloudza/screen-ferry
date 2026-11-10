@@ -10,7 +10,7 @@ pub fn init_output() {
 pub fn run(mode: Mode) -> Result<(), String> {
     if mode == Mode::Help {
         println!(
-            "screenferry-service install | stop | remove\nscreenferry-service authorize <用户SID> <控制端公开授权码>\nscreenferry-service revoke <用户SID> <设备完整指纹>\n实验 Windows 安全输入服务（管理操作需要管理员权限；普通构建禁止启用）。授权码必须从控制端经可信渠道核对，普通配对不授予 UAC 权限。"
+            "screenferry-service install | stop | remove\nscreenferry-service authorize <用户SID> <控制端公开授权码>\nscreenferry-service revoke <用户SID> <设备完整指纹>\nWindows 安全输入服务（管理操作需要管理员权限）。授权码必须从控制端经可信渠道核对，普通配对不授予 UAC 权限。"
         );
         return Ok(());
     }

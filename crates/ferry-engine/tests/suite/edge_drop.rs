@@ -333,6 +333,43 @@ async fn the_client_learns_its_edge_from_the_server_and_shows_received_files() {
 }
 
 #[tokio::test]
+async fn dragging_with_the_clients_own_mouse_is_noticed_at_the_edge() {
+    // 光标不归服务端控制：客户端的用户用自己的鼠标（或触控板）拖文件。
+    let (rig, overlay, _edge) = client_with_edge_drop().await;
+    let source = TempDir::new();
+    fs::create_dir_all(source.path()).unwrap();
+    let file = source.path().join("照片.jpg");
+    fs::write(&file, b"jpg").unwrap();
+
+    rig.inject
+        .set_local_pointer(Some((Point::new(900, 400), false)));
+    sleep(Duration::from_millis(250)).await;
+    assert!(overlay.watching().is_none(), "没按键时不留意");
+
+    // 按下鼠标，拖到朝向服务端的左边缘附近：像 Windows 那样先在贴边留意。
+    rig.inject
+        .set_local_pointer(Some((Point::new(900, 400), true)));
+    sleep(Duration::from_millis(250)).await;
+    rig.inject
+        .set_local_pointer(Some((Point::new(40, 400), true)));
+    eventually("在贴边留意", || overlay.watching().is_some()).await;
+
+    // 拖着文件进了接收条：展开成“松手发送”。
+    overlay.start_drag(vec![file]);
+    overlay.emit(OverlayEvent::DragEntered { files: true });
+    eventually("展开成松手发送", || {
+        texts(&overlay).contains(&"松手发送到".to_owned())
+    })
+    .await;
+
+    // 松开后不再留意；服务端把光标推过来时，改由它说了算。
+    rig.inject
+        .set_local_pointer(Some((Point::new(900, 400), false)));
+    eventually("不再留意", || overlay.watching().is_none()).await;
+    rig.enter().await;
+}
+
+#[tokio::test]
 async fn dragging_files_to_the_edge_on_the_client_sends_them_to_the_server() {
     let (rig, overlay, _edge) = client_with_edge_drop().await;
     let source = TempDir::new();

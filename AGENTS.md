@@ -67,7 +67,7 @@ screen-ferry/
 │  └─ windows/             #   app.manifest（DPI、uiAccess）、安装包配置
 ├─ docs/
 │  ├─ architecture.md      #   架构总览 + crate 地图
-│  ├─ protocol.md          #   线协议说明（带版本号）
+│  ├─ protocol.md          #   线协议说明
 │  ├─ releases/            #   每个版本的中英文更新说明（ADR 0014）
 │  └─ adr/                 #   架构决策记录
 ├─ .github/workflows/
@@ -98,13 +98,13 @@ crates/
 │  ── L3 组装 ───────────────────────────────────
 ├─ ferry-engine             # 把 core、platform、net、store、ipc 组装成运行时
 │  ── L4 应用（二进制）────────────────────────────
-└─ ferry-daemon             # → screenferry：后台常驻 + 托盘
+├─ ferry-daemon             # → screenferry：后台常驻 + 托盘
+└─ ferry-service            # → screenferry-service：Windows 安全输入服务（可选，ADR 0015）
 ```
 
 按规则预留、尚未创建的 crate：
 
 - `ferry-platform-linux`（L2）
-- `ferry-service` → `screenferry-service`（L4，Windows 安全桌面服务）
 
 ## 5. 依赖规则
 
@@ -258,7 +258,9 @@ flutter test
 |---|---|---|
 | 只有修复 | 最后一位 | 0.2.0 → 0.2.1 |
 | 新功能、改进 | 中间一位，最后一位归零 | 0.2.3 → 0.3.0 |
-| 改了两台之间的通信方式（线协议版本） | 中间一位，并在更新说明里写明两台要一起更新 | 0.3.1 → 0.4.0 |
+
+没有单独的协议版本：两台之间的通信靠能力位协商，任意两个已发布的版本都要能互连（规则见 `docs/protocol.md` 第 7 节）。
+新增消息必须配新的能力位，并且对方没有这个能力时有退路；不要改 `ferry_proto::WIRE_FORMAT`。
 
 Cargo.toml 的 `[workspace.package] version` 是唯一的版本号，`app/pubspec.yaml` 跟着它走，都由 `cargo xtask release` 改，不要手改。
 

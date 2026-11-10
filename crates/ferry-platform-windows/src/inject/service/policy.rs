@@ -51,7 +51,6 @@ impl Policy {
 }
 
 pub fn authorize(user: &str, code: &str) -> Result<()> {
-    super::require_experimental()?;
     let authorization = InputAuthorization::from_code(code).map_err(|e| failure(&e.to_string()))?;
     let value = value_name(user, authorization.fingerprint)?;
     let key = open(&["SOFTWARE", "ScreenFerry", "SecureInput"], true, true)?

@@ -427,7 +427,38 @@ async fn a_desktop_change_without_new_input_returns_control_and_releases_after_r
         button: MouseButton::LEFT,
         pressed: false,
     });
+    // 整个过程连接没有断：断开重连会多出一次显示、一次隐藏光标。
+    assert_eq!(rig.inject.cursor_hidden(), [true, false, true]);
     rig.enter().await;
+}
+
+#[tokio::test]
+async fn an_unavailable_desktop_refuses_the_cursor_but_keeps_the_connection() {
+    let rig = Rig::start().await;
+    eventually("连上后隐藏本机光标", || {
+        rig.inject.cursor_hidden() == [true]
+    })
+    .await;
+
+    // 光标还在控制端时本机锁屏或切到管理员窗口：不影响连接。
+    rig.inject.set_available(false);
+    tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+    assert!(!rig.client.is_finished());
+
+    // 光标要过来：本机拒绝，控制端收回键鼠。
+    rig.push(1, 0);
+    eventually("被拒绝后控制端收回键鼠", || {
+        !rig.capture.is_grabbed()
+    })
+    .await;
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    assert!(!rig.capture.is_grabbed());
+    assert!(rig.inject.events().is_empty(), "不可用期间不注入任何键鼠");
+
+    // 恢复后照常进入；中间没有断开重连过。
+    rig.inject.set_available(true);
+    rig.enter().await;
+    assert_eq!(rig.inject.cursor_hidden(), [true, false]);
 }
 
 #[tokio::test]

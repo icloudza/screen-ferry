@@ -40,7 +40,7 @@ jobs:
           Start-Process $installer -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', "/DIR=$dir" -Wait
           "ISCC=$(Join-Path $dir 'ISCC.exe')" >> $env:GITHUB_ENV
       - name: 构建完整 release 安装包
-        run: cargo xtask bundle --experimental-secure-input
+        run: cargo xtask bundle
       - name: 放入验收说明
         run: Copy-Item docs/actions-validation.md target/bundle/windows/README.md
       - uses: actions/upload-artifact@v4

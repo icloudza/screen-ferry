@@ -107,7 +107,7 @@ fn publish(site: &Site, key: &Key, expires_in: i64) {
         version: "9.0.0".into(),
         published: Manifest::format_time(now - 60),
         expires: Manifest::format_time(now + expires_in),
-        protocol: ferry_proto::PROTOCOL_VERSION,
+        protocol: ferry_proto::WIRE_FORMAT,
         notes: Notes {
             zh: "新功能".into(),
             en: "New things".into(),

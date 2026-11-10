@@ -59,7 +59,6 @@ pub(super) fn running() -> bool {
 }
 
 pub fn install() -> Result<()> {
-    super::require_experimental()?;
     let manager = manager(SC_MANAGER_CONNECT | SC_MANAGER_CREATE_SERVICE)?;
     security::harden_installation()?;
     let installed = Installed::load()?;
@@ -191,7 +190,6 @@ fn wait_state(service: &ServiceHandle, wanted: SERVICE_STATUS_CURRENT_STATE) -> 
 }
 
 pub fn run() -> Result<()> {
-    super::require_experimental()?;
     let name = HSTRING::from(NAME);
     let entries = [
         SERVICE_TABLE_ENTRYW {

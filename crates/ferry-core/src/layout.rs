@@ -7,8 +7,8 @@ pub use ferry_types::Side;
 
 /// 所有显示器的外接矩形。没有显示器时返回 `None`。
 ///
-/// 目前把一台设备的全部显示器当作一个矩形处理：显示器排成 L 形时，
-/// 凹进去的那段边缘不会触发切换。
+/// 切换边缘按这个矩形判断：显示器排成 L 形时，凹进去的那段边缘不会触发切换。
+/// 矩形里没有屏幕的空白由 `EdgeSwitch` 按各块显示器的范围避开。
 pub fn bounds(displays: &[Display]) -> Option<Rect> {
     let (first, rest) = displays.split_first()?;
     let (mut left, mut top) = (first.bounds.x, first.bounds.y);

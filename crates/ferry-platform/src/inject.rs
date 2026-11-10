@@ -1,6 +1,6 @@
 //! 输入注入：定义 `InputInject` trait。
 
-use ferry_types::{InputEvent, InputProof, LockKeys};
+use ferry_types::{InputEvent, InputProof, LockKeys, Point};
 
 use crate::error::Result;
 
@@ -25,6 +25,12 @@ pub trait InputInject: Send {
     /// 让控制端收回键鼠；恢复后可以重新连接。无需额外检查的平台使用默认实现。
     fn check_available(&mut self) -> Result<()> {
         Ok(())
+    }
+
+    /// 本机自己的鼠标现在在哪（桌面坐标）、是否按着左键；查不到时返回 `None`。
+    /// 光标不归对方控制时，被控端靠它发现本机用户在往屏幕边缘拖文件。只读，不注入任何东西。
+    fn local_pointer(&mut self) -> Option<(Point, bool)> {
+        None
     }
 
     /// 注入一个事件。`Button` 与 `Wheel` 只执行按键和滚动，光标定位由调用方先行注入。

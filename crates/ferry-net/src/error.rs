@@ -16,7 +16,7 @@ pub enum Error {
     Closed,
     #[error("握手时应收到 {expected}，却收到了其他消息")]
     UnexpectedMessage { expected: &'static str },
-    #[error("对方拒绝连接（原因 {}，对方协议版本 {}）", .0.reason.0, .0.version)]
+    #[error("对方拒绝连接（原因 {}）", .0.reason.0)]
     Rejected(Reject),
     #[error("无法初始化 TLS：{0}")]
     TlsConfig(#[from] rustls::Error),

@@ -3,8 +3,8 @@
 use ferry_proto::{
     Bye, ByeReason, Cancel, CancelReason, Capabilities, Channel, Chunk, ClipboardItem,
     ClipboardOffer, ClipboardRequest, Codec, DropHint, Enter, EntryKind, FileCancel, FileEnd,
-    FileEntry, FileList, FileOffer, FileResume, Hello, HintState, Message, PROTOCOL_VERSION,
-    Reject, RejectReason, Welcome,
+    FileEntry, FileList, FileOffer, FileResume, Hello, HintState, Message, Reject, RejectReason,
+    WIRE_FORMAT, Welcome,
 };
 use ferry_types::{
     ClipboardFormat, Display, DisplayId, InputEvent, KeyAction, KeyCode, LockKeys, MouseButton,
@@ -42,7 +42,7 @@ pub fn samples() -> Vec<(Channel, Message)> {
         (
             Channel::Data,
             Message::Welcome(Welcome {
-                version: PROTOCOL_VERSION,
+                format: WIRE_FORMAT,
                 capabilities: Capabilities::all(),
                 session: u64::MAX,
                 name: "办公室 PC".into(),
@@ -101,6 +101,7 @@ pub fn samples() -> Vec<(Channel, Message)> {
         (Channel::Input, Message::Leave { seq: 42 }),
         (Channel::Input, Message::PeerSide { side: Side::Right }),
         (Channel::Input, Message::OpenSettings),
+        (Channel::Input, Message::InputBlocked),
         (
             Channel::Input,
             Message::AppInfo {

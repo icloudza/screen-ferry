@@ -31,9 +31,8 @@ impl WinInject {
     pub fn new() -> Self {
         Self {
             local: LocalInject::new(),
-            privileged: cfg!(feature = "experimental-secure-input")
-                && controller::running()
-                && Installed::load().is_ok(),
+            // 安装时选了安全输入、服务在运行、安装目录受保护，才走特权代理；否则就是普通权限注入。
+            privileged: controller::running() && Installed::load().is_ok(),
             connection: None,
             bound: None,
         }
@@ -117,6 +116,10 @@ impl InputInject for WinInject {
         } else {
             self.local.check_available()
         }
+    }
+
+    fn local_pointer(&mut self) -> Option<(ferry_types::Point, bool)> {
+        self.local.local_pointer()
     }
 
     fn inject(&mut self, event: &InputEvent) -> Result<()> {

@@ -23,12 +23,6 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
       - run: cargo xtask lint
-      - name: 检查实验安全输入服务（不安装或启动）
-        if: runner.os == 'Windows'
-        run: cargo clippy -p ferry-service -p ferry-daemon --features ferry-service/experimental-secure-input --all-targets -- -D warnings
-      - name: 编译实验安全输入服务和后台
-        if: runner.os == 'Windows'
-        run: cargo build -p ferry-service -p ferry-daemon --features ferry-service/experimental-secure-input
 
   settings-ui:
     name: settings ui (Flutter)

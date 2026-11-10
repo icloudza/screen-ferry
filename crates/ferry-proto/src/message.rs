@@ -67,6 +67,9 @@ pub enum Message {
     /// 请接收方打开它的设置界面，翻到发送方这台设备的设置页。需要 `REMOTE_SETTINGS` 能力。
     /// 被控制的一方想改“对方控制本机时”的滚动、按键等设置时用：这些设置在控制的一方。
     OpenSettings,
+    /// 被控端暂时收不了键鼠（锁屏、权限提示、前台是管理员窗口或注入失败），请控制端把光标收回去。
+    /// 连接保持，剪贴板和文件照常。需要 `INPUT_BLOCKED` 能力。
+    InputBlocked,
     /// 发送方的程序版本（例如 `0.2.0`），握手后发一次。需要 `APP_INFO` 能力。
     /// 设置界面据此显示对方的版本，提醒两台一起更新。
     AppInfo {
@@ -123,6 +126,7 @@ mod ty {
     pub(super) const APP_INFO: u16 = 0x0106;
     pub(super) const SECURE_CHALLENGE: u16 = 0x0107;
     pub(super) const SECURE_INPUT: u16 = 0x0108;
+    pub(super) const INPUT_BLOCKED: u16 = 0x0109;
     pub(super) const KEY: u16 = 0x0110;
     pub(super) const POINTER_MOTION: u16 = 0x0120;
     pub(super) const POINTER_DELTA: u16 = 0x0121;
@@ -160,6 +164,7 @@ pub(crate) fn allowed(ty: u16, channel: Channel) -> Option<bool> {
         | ty::APP_INFO
         | ty::SECURE_CHALLENGE
         | ty::SECURE_INPUT
+        | ty::INPUT_BLOCKED
         | ty::KEY
         | ty::POINTER_MOTION
         | ty::POINTER_DELTA
@@ -210,6 +215,7 @@ impl Message {
             Self::PeerSide { .. } => ty::PEER_SIDE,
             Self::DropHint(_) => ty::DROP_HINT,
             Self::OpenSettings => ty::OPEN_SETTINGS,
+            Self::InputBlocked => ty::INPUT_BLOCKED,
             Self::AppInfo { .. } => ty::APP_INFO,
             Self::Input(event) => match event {
                 InputEvent::Key { .. } => ty::KEY,
@@ -278,7 +284,7 @@ impl Message {
             Self::FileResume(m) => m.encode(w),
             Self::FileData { data } => file::encode_data(data, w),
             Self::FileEnd(m) => m.encode(w),
-            Self::FileDone | Self::OpenSettings => Ok(()),
+            Self::FileDone | Self::OpenSettings | Self::InputBlocked => Ok(()),
         }
     }
 
@@ -347,6 +353,7 @@ impl Message {
             ty::FILE_END => Self::FileEnd(FileEnd::decode(r)?),
             ty::FILE_DONE => Self::FileDone,
             ty::OPEN_SETTINGS => Self::OpenSettings,
+            ty::INPUT_BLOCKED => Self::InputBlocked,
             ty::APP_INFO => Self::AppInfo {
                 version: r.str(MAX_VERSION_LEN, "版本号长度")?,
             },

@@ -5,7 +5,7 @@
 //!   版本号的规矩：只有修复升最后一位；有新功能、改进，或者改了两台之间的通信方式，升中间一位。推送由人来做，推上 tag 后
 //!   CI（`.github/workflows/release.yml`）构建两个系统的安装包，存成 GitHub 上的草稿。
 //! - `manifest`：CI 用。按目录里的更新包写 `update.json`：版本、发布和过期时间、各平台的地址、
-//!   大小和 SHA-256、线协议版本、更新说明。
+//!   大小和 SHA-256、握手格式标记（固定为 1）、更新说明。
 //! - `sign <文件>`：CI 用。用发布私钥给文件做 minisign 签名，写出 `<文件>.minisig`，再用程序内置的
 //!   公钥校验一遍，确认签名的密钥是程序认的。私钥和口令来自环境变量
 //!   `SCREENFERRY_UPDATE_KEY`（私钥文件的内容）、`SCREENFERRY_UPDATE_KEY_PASSWORD`。
@@ -300,7 +300,7 @@ pub(crate) fn manifest(args: &[String]) -> Result {
         version,
         published: Manifest::format_time(now),
         expires: Manifest::format_time(now + MANIFEST_LIFETIME),
-        protocol: ferry_proto::PROTOCOL_VERSION,
+        protocol: ferry_proto::WIRE_FORMAT,
         notes,
         assets,
     };

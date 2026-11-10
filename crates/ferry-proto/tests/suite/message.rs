@@ -24,6 +24,7 @@ fn kind(message: &Message) -> &'static str {
         Message::PeerSide { .. } => "PeerSide",
         Message::DropHint(_) => "DropHint",
         Message::OpenSettings => "OpenSettings",
+        Message::InputBlocked => "InputBlocked",
         Message::AppInfo { .. } => "AppInfo",
         Message::Input(event) => match event {
             InputEvent::Key { .. } => "Key",
@@ -50,7 +51,7 @@ fn kind(message: &Message) -> &'static str {
     }
 }
 
-const MESSAGE_KINDS: usize = 36;
+const MESSAGE_KINDS: usize = 37;
 
 fn decode(channel: Channel, buf: &[u8]) -> Result<Option<(Message, usize)>, DecodeError> {
     Codec::new(channel).decode(buf)
@@ -96,7 +97,7 @@ fn wire_format_is_frozen() {
     #[rustfmt::skip]
     let expected = [
         0x01, 0x00, 22, 0, 0, 0,  // 类型 Hello，消息体 22 字节
-        2, 0,                     // 版本 2：签署输入协议
+        1, 0,                     // 版本 1
         1,                        // 输入连接
         2, 0, 0, 0, 0, 0, 0, 0,   // 能力：CLIPBOARD
         0, 0, 0, 0, 0, 0, 0, 0,   // 会话号 0

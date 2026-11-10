@@ -314,6 +314,16 @@ impl InputInject for MacInject {
         }
     }
 
+    fn local_pointer(&mut self) -> Option<(Point, bool)> {
+        // 一个空事件带着当前的光标位置（全局坐标，原点在主屏左上角，单位为点）。
+        let at = CGEvent::location(CGEvent::new(None).as_deref());
+        let held = CGEventSource::button_state(
+            CGEventSourceStateID::CombinedSessionState,
+            CGMouseButton::Left,
+        );
+        Some((Point::new(at.x.round() as i32, at.y.round() as i32), held))
+    }
+
     fn sync_locks(&mut self, wanted: LockKeys, mask: LockKeys) -> Result<()> {
         // macOS 只有 Caps Lock。
         if !mask.contains(LockKeys::CAPS) {

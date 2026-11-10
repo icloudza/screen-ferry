@@ -497,7 +497,7 @@ impl<U: Updater + 'static> Updates<U> {
                 .map_or(0, |a| a.size),
             notes_zh: r.notes.zh.clone(),
             notes_en: r.notes.en.clone(),
-            breaks_peers: r.protocol != ferry_proto::PROTOCOL_VERSION,
+            breaks_peers: r.protocol != ferry_proto::WIRE_FORMAT,
         });
         let (error, message) = match &self.error {
             Some((e, m)) => (Some(*e), m.clone()),
