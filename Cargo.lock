@@ -316,7 +316,7 @@ dependencies = [
 
 [[package]]
 name = "ferry-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ferry-types",
  "png",
@@ -324,7 +324,7 @@ dependencies = [
 
 [[package]]
 name = "ferry-daemon"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "embed-resource",
  "ferry-core",
@@ -346,7 +346,7 @@ dependencies = [
 
 [[package]]
 name = "ferry-engine"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ferry-core",
  "ferry-ipc",
@@ -368,7 +368,7 @@ dependencies = [
 
 [[package]]
 name = "ferry-ipc"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ferry-types",
  "ring",
@@ -380,7 +380,7 @@ dependencies = [
 
 [[package]]
 name = "ferry-net"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ferry-proto",
  "ferry-trust",
@@ -397,7 +397,7 @@ dependencies = [
 
 [[package]]
 name = "ferry-platform"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ferry-types",
  "thiserror",
@@ -405,7 +405,7 @@ dependencies = [
 
 [[package]]
 name = "ferry-platform-macos"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "dispatch2",
  "ferry-core",
@@ -421,7 +421,7 @@ dependencies = [
 
 [[package]]
 name = "ferry-platform-mock"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ferry-platform",
  "ferry-trust",
@@ -430,7 +430,7 @@ dependencies = [
 
 [[package]]
 name = "ferry-platform-windows"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ferry-core",
  "ferry-platform",
@@ -444,7 +444,7 @@ dependencies = [
 
 [[package]]
 name = "ferry-proto"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bitflags",
  "ferry-types",
@@ -453,7 +453,7 @@ dependencies = [
 
 [[package]]
 name = "ferry-service"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "embed-resource",
  "ferry-platform-windows",
@@ -461,7 +461,7 @@ dependencies = [
 
 [[package]]
 name = "ferry-store"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ferry-trust",
  "ferry-types",
@@ -473,7 +473,7 @@ dependencies = [
 
 [[package]]
 name = "ferry-trust"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ferry-types",
  "rcgen",
@@ -484,7 +484,7 @@ dependencies = [
 
 [[package]]
 name = "ferry-types"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bitflags",
  "serde",
@@ -492,7 +492,7 @@ dependencies = [
 
 [[package]]
 name = "ferry-update"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "minisign",
  "minisign-verify",
@@ -2064,7 +2064,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ferry-proto",
  "ferry-update",
