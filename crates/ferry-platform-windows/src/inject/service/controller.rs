@@ -58,6 +58,33 @@ pub(super) fn running() -> bool {
     }
 }
 
+/// 服务程序在 SCM 登记的位置。登记受服务对象的 ACL 保护，普通用户只能读。
+pub(super) fn image() -> Result<std::path::PathBuf> {
+    let manager = manager(SC_MANAGER_CONNECT)?;
+    // 按 8 字节对齐分配，QUERY_SERVICE_CONFIGW 里的指针指向同一块缓冲区。
+    let mut buffer = vec![0_u64; 8192 / 8];
+    let mut needed = 0;
+    // SAFETY: 只读查询固定服务的配置；缓冲区是文档规定的最大 8 KB，且在读取期间一直有效。
+    let command = unsafe {
+        let service = OpenServiceW(manager.0, &HSTRING::from(NAME), SERVICE_QUERY_CONFIG)
+            .map(ServiceHandle)
+            .map_err(|e| os("查询输入服务", e))?;
+        let config = buffer.as_mut_ptr().cast::<QUERY_SERVICE_CONFIGW>();
+        QueryServiceConfigW(service.0, Some(config), 8192, &mut needed)
+            .map_err(|e| os("读取输入服务配置", e))?;
+        (*config)
+            .lpBinaryPathName
+            .to_string()
+            .map_err(|e| failure(&e.to_string()))?
+    };
+    // 安装时写的是 `"<路径>" run`；不是这个形状就不认。
+    command
+        .strip_prefix('"')
+        .and_then(|rest| rest.split_once('"'))
+        .map(|(path, _)| std::path::PathBuf::from(path))
+        .ok_or_else(|| failure("输入服务登记的位置无法识别"))
+}
+
 pub fn install() -> Result<()> {
     let manager = manager(SC_MANAGER_CONNECT | SC_MANAGER_CREATE_SERVICE)?;
     security::harden_installation()?;
@@ -120,7 +147,7 @@ pub fn install() -> Result<()> {
 }
 
 pub fn prepare(directory: &std::path::Path) -> Result<()> {
-    // 先确认调用者有安装服务的权限，才允许创建应用安装目录。
+    // 先确认调用者有安装服务的权限，才允许创建服务目录。
     let _manager = manager(SC_MANAGER_CONNECT | SC_MANAGER_CREATE_SERVICE)?;
     security::prepare_directory(directory)
 }

@@ -71,7 +71,7 @@ ScreenFerry checks for updates once a day and downloads them in the background. 
 About the Windows installer:
 
 - It isn't code-signed. If SmartScreen blocks it, choose More info → Run anyway.
-- It installs into Program Files and allows ScreenFerry through the firewall on private and domain networks.
+- It installs into Program Files by default (you can pick another drive) and allows ScreenFerry through the firewall on private and domain networks.
 - The installer has an optional task, off by default: “Allow paired computers to control Windows permission prompts (UAC)”. It installs a system service that only handles keyboard and mouse, so the other computer can operate permission prompts, the lock screen and programs running as administrator. Besides pairing, an administrator must authorize that computer separately. Network connections, clipboard and files stay in the normal user process.
 - Updates install silently after one administrator prompt. Without secure input, use this computer's own keyboard and mouse to approve it. Uninstall from Settings → Apps; your settings and pairings are kept.
 

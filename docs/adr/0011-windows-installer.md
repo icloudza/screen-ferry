@@ -23,7 +23,7 @@
   `ScreenFerry-<版本>-windows-x64-setup.exe`；CI 下载官方发布的 7.1.1 并核对校验和（运行器自带的是 6.x）。
   也考虑过 WiX（MSI）：更适合企业批量部署，但写起来繁琐得多，在 macOS 上也没法检查，暂时用不上。
 - 装进 Program Files（`{autopf}\ScreenFerry`），需要管理员权限。所有用户都能用；防火墙规则只有管理员能加；
-  以后要做的 Windows 安全桌面服务（`screenferry-service`）也必须装在这里。
+  用户可以改到别的盘；Windows 安全输入服务的程序（`screenferry-service`）不跟着走，固定放在这里（ADR 0015）。
 - 开始菜单有 ScreenFerry，桌面快捷方式可选；“设置 → 应用”里能卸载，显示图标、版本、发布者。
 - 防火墙：给 `screenferry.exe` 加一条入站放行规则（`netsh advfirewall`），只放行专用网络和域网络，覆盖键鼠、剪贴板、
   邀请端口和局域网发现。公用网络不放行，连到公用网络时 Windows 照常询问，由用户决定。卸载时删掉。

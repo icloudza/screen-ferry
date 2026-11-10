@@ -55,26 +55,19 @@ pub fn run_agent(parent_pid: u32, stop_handle: usize) -> Result<()> {
     let stop = Handle::new(copied)?;
     let pipe = Pipe::create(session, &user)?;
     let mut desks = Desks::default();
-    let result = serve(&pipe, &stop, &installed, session, &user, &mut desks);
+    let result = serve(&pipe, &stop, session, &user, &mut desks);
     let cleanup = desks.shutdown();
     result.and(cleanup)
 }
 
-fn serve(
-    pipe: &Pipe,
-    stop: &Handle,
-    installed: &Installed,
-    session: u32,
-    user: &str,
-    desks: &mut Desks,
-) -> Result<()> {
+fn serve(pipe: &Pipe, stop: &Handle, session: u32, user: &str, desks: &mut Desks) -> Result<()> {
     while !stop.signalled() && security::active_session() == session {
         // 即使后台已断开，也在原桌面恢复时补发尚未成功释放的键。
         let _ = desks.refresh();
         if !pipe.accept()? {
             continue;
         }
-        if let Ok(peer) = security::verify_peer(pipe.handle.0, installed, false, session, user) {
+        if let Ok(peer) = security::verify_client(pipe.handle.0, session, user) {
             let _ = connection(pipe, stop, &peer, session, user, desks);
         }
         desks.hidden = false;

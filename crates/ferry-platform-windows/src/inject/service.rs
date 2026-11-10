@@ -16,4 +16,3 @@ pub use policy::{authorize, revoke};
 
 const NAME: &str = "ScreenFerryInput";
 const SERVICE_EXE: &str = "screenferry-service.exe";
-const DAEMON_EXE: &str = "screenferry.exe";

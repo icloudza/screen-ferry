@@ -31,8 +31,8 @@ impl WinInject {
     pub fn new() -> Self {
         Self {
             local: LocalInject::new(),
-            // 安装时选了安全输入、服务在运行、安装目录受保护，才走特权代理；否则就是普通权限注入。
-            privileged: controller::running() && Installed::load().is_ok(),
+            // 安装时选了安全输入、服务在运行、服务程序受保护，才走特权代理；否则就是普通权限注入。
+            privileged: controller::running() && Installed::registered().is_ok(),
             connection: None,
             bound: None,
         }
@@ -111,7 +111,9 @@ impl InputInject for WinInject {
     }
 
     fn check_available(&mut self) -> Result<()> {
-        if self.privileged {
+        // 只有绑定了授权过的远端才经过代理。装了服务但这台控制端没被授权时，和没装服务完全一样：
+        // 否则每次检查都会另开一条管道连接，代理 1.5 秒收不到下一条请求就把它关掉，下一次检查必然失败。
+        if self.bound.is_some() {
             self.request(Command::Check).map(|_| ())
         } else {
             self.local.check_available()
@@ -157,10 +159,10 @@ impl Drop for WinInject {
 
 impl Client {
     fn connect() -> Result<Self> {
-        let installed = Installed::load()?;
+        let installed = Installed::registered()?;
         let session = security::current_session()?;
         let pipe = Pipe::connect(session)?;
-        let peer = security::verify_peer(pipe.handle.0, &installed, true, session, "")?;
+        let peer = security::verify_server(pipe.handle.0, &installed, session)?;
         let mut connection = Self {
             pipe,
             sequence: 0,

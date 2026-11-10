@@ -73,6 +73,26 @@ async fn secure_input_crosses_real_tls_and_the_backend_never_reinjects_unsigned_
 }
 
 #[tokio::test]
+async fn a_broken_secure_input_service_falls_back_to_ordinary_input() {
+    use crate::support::Setup;
+    use ferry_platform_mock::MockInject;
+    let inject = MockInject::new();
+    inject.break_remote_challenge();
+    let rig = Rig::with(Setup {
+        pc_inject: Some(inject),
+        ..Setup::default()
+    })
+    .await;
+    rig.enter().await;
+    rig.push(5, 0);
+    eventually("普通权限的输入照常注入", || {
+        !rig.inject.events().is_empty()
+    })
+    .await;
+    assert!(rig.inject.verified_inputs().is_empty());
+}
+
+#[tokio::test]
 async fn revoking_independent_input_authorization_ends_the_active_session() {
     use crate::support::Setup;
     use ferry_platform_mock::MockInject;

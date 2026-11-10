@@ -1,4 +1,7 @@
-//! 管道身份与安装文件权限。所有路径均从本程序位置派生，不接受客户端提供的路径。
+//! 管道身份与服务文件权限。服务程序的位置只从本程序自身或 SCM 的登记得到，不接受客户端提供的路径。
+//!
+//! 服务程序固定放在系统盘受保护的目录里，和 ScreenFerry 装在哪个盘无关：
+//! 后台程序可以在任何位置，它不属于受信任的部分——特权输入只认管理员授权过的远端设备签名。
 
 use std::os::windows::fs::MetadataExt;
 use std::path::{Path, PathBuf};
@@ -24,8 +27,8 @@ use windows::Win32::System::Threading::{
 };
 use windows::core::{BOOL, HSTRING, PWSTR};
 
+use super::SERVICE_EXE;
 use super::util::{Handle, failure, os};
-use super::{DAEMON_EXE, SERVICE_EXE};
 
 pub(super) struct Descriptor(PSECURITY_DESCRIPTOR);
 
@@ -66,24 +69,35 @@ impl Drop for Descriptor {
 
 pub(super) struct Installed {
     pub agent: PathBuf,
-    pub daemon: PathBuf,
     /// 保留打开的句柄，验证后不允许目录或映像被重命名/替换。
     _files: Vec<Handle>,
 }
 
 impl Installed {
+    /// 服务和代理用：服务程序就是本程序自己。
     pub fn load() -> Result<Self> {
-        let current = std::env::current_exe().map_err(|e| failure(&e.to_string()))?;
-        let directory = current.parent().ok_or_else(|| failure("没有安装目录"))?;
+        Self::at(&std::env::current_exe().map_err(|e| failure(&e.to_string()))?)
+    }
+
+    /// 后台用：服务程序在 SCM 登记的位置。登记只有管理员能改，后台自己在哪个盘都可以。
+    pub fn registered() -> Result<Self> {
+        Self::at(&super::controller::image()?)
+    }
+
+    fn at(agent: &Path) -> Result<Self> {
+        if !agent
+            .file_name()
+            .is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case(SERVICE_EXE))
+        {
+            return Err(failure("不是 ScreenFerry 的输入服务程序"));
+        }
+        let directory = agent.parent().ok_or_else(|| failure("没有服务目录"))?;
         let mut files = Vec::new();
         for ancestor in directory.ancestors() {
             files.push(protected(ancestor, ancestor == directory)?);
         }
-        let agent = directory.join(SERVICE_EXE);
-        let daemon = directory.join(DAEMON_EXE);
-        files.push(protected(&agent, true)?);
-        files.push(protected(&daemon, true)?);
-        // SYSTEM 代理只从应用目录和 System32 加载 DLL；根目录中不能留下用户可改的文件。
+        files.push(protected(agent, true)?);
+        // SYSTEM 代理只从服务目录和 System32 加载 DLL；目录中不能留下用户可改的文件。
         for entry in directory.read_dir().map_err(|e| failure(&e.to_string()))? {
             let path = entry.map_err(|e| failure(&e.to_string()))?.path();
             if path.is_file() {
@@ -91,8 +105,7 @@ impl Installed {
             }
         }
         Ok(Self {
-            agent: canonical(&agent)?,
-            daemon: canonical(&daemon)?,
+            agent: canonical(agent)?,
             _files: files,
         })
     }
@@ -110,7 +123,7 @@ pub(super) fn prepare_directory(directory: &Path) -> Result<()> {
             .components()
             .any(|c| matches!(c, Component::ParentDir | Component::CurDir))
     {
-        return Err(failure("安全输入需要本机受保护的 ScreenFerry 安装目录"));
+        return Err(failure("输入服务需要本机受保护的 ScreenFerry 目录"));
     }
     let mut guards = Vec::new();
     for parent in directory.parent().into_iter().flat_map(Path::ancestors) {
@@ -122,7 +135,7 @@ pub(super) fn prepare_directory(directory: &Path) -> Result<()> {
         let attributes = descriptor.attributes(false);
         // SAFETY: 父目录已验证并保持打开。目录在创建时就有保护 ACL，不存在先创建后收紧的窗口。
         unsafe { CreateDirectoryW(&HSTRING::from(directory.as_os_str()), Some(&attributes)) }
-            .map_err(|e| os("创建受保护安装目录", e))?;
+            .map_err(|e| os("创建受保护的服务目录", e))?;
     }
     guards.push(protected(directory, true)?);
     for entry in directory.read_dir().map_err(|e| failure(&e.to_string()))? {
@@ -134,10 +147,10 @@ pub(super) fn prepare_directory(directory: &Path) -> Result<()> {
     Ok(())
 }
 
-/// 安装器已取得管理员权限后，只收紧固定安装目录及两份映像的 ACL。
+/// 安装器已取得管理员权限后，只收紧服务目录和服务程序的 ACL。
 pub(super) fn harden_installation() -> Result<()> {
     let current = std::env::current_exe().map_err(|e| failure(&e.to_string()))?;
-    let directory = current.parent().ok_or_else(|| failure("没有安装目录"))?;
+    let directory = current.parent().ok_or_else(|| failure("没有服务目录"))?;
     // 先验证所有上级；不能把服务装在用户能改名、替换的目录里。
     for ancestor in directory.parent().into_iter().flat_map(Path::ancestors) {
         protected(ancestor, false)?;
@@ -145,7 +158,6 @@ pub(super) fn harden_installation() -> Result<()> {
     for (path, directory) in [
         (directory.to_owned(), true),
         (directory.join(SERVICE_EXE), false),
-        (directory.join(DAEMON_EXE), false),
     ] {
         let flags = if directory { "OICI" } else { "" };
         let descriptor = Descriptor::from_sddl(&format!(
@@ -424,41 +436,35 @@ pub(super) fn session_identity(session: u32) -> Result<(String, u64)> {
     Ok((user, logon))
 }
 
-pub(super) fn verify_peer(
-    pipe: HANDLE,
-    installed: &Installed,
-    server: bool,
-    session: u32,
-    user: &str,
-) -> Result<Handle> {
+/// 后台核验管道另一头是登记过的 SYSTEM 服务程序，防止别的程序抢先建同名管道冒充代理。
+pub(super) fn verify_server(pipe: HANDLE, installed: &Installed, session: u32) -> Result<Handle> {
     let mut pid = 0;
     // SAFETY: 从本对象的管道句柄查询内核记录的对端 PID，不信任请求中的身份字段。
-    unsafe {
-        if server {
-            GetNamedPipeServerProcessId(pipe, &mut pid)
-        } else {
-            GetNamedPipeClientProcessId(pipe, &mut pid)
-        }
-    }
-    .map_err(|e| os("核验输入代理对端", e))?;
-    let expected = if server {
-        &installed.agent
-    } else {
-        &installed.daemon
-    };
+    unsafe { GetNamedPipeServerProcessId(pipe, &mut pid) }
+        .map_err(|e| os("核验输入代理对端", e))?;
     verified_process(
         pid,
-        expected,
+        Some(&installed.agent),
         session,
-        if server { "S-1-5-18" } else { user },
+        "S-1-5-18",
         Default::default(),
     )
+}
+
+/// 代理核验管道另一头是同一登录会话里的同一个用户。
+/// 不核对它是哪个程序：后台可以装在任何盘，那里的文件不受保护；特权输入的把关在远端设备签名和管理员授权。
+pub(super) fn verify_client(pipe: HANDLE, session: u32, user: &str) -> Result<Handle> {
+    let mut pid = 0;
+    // SAFETY: 从本对象的管道句柄查询内核记录的对端 PID，不信任请求中的身份字段。
+    unsafe { GetNamedPipeClientProcessId(pipe, &mut pid) }
+        .map_err(|e| os("核验输入代理对端", e))?;
+    verified_process(pid, None, session, user, Default::default())
 }
 
 pub(super) fn service_parent(pid: u32, installed: &Installed) -> Result<Handle> {
     verified_process(
         pid,
-        &installed.agent,
+        Some(&installed.agent),
         0,
         "S-1-5-18",
         windows::Win32::System::Threading::PROCESS_DUP_HANDLE,
@@ -467,7 +473,7 @@ pub(super) fn service_parent(pid: u32, installed: &Installed) -> Result<Handle> 
 
 fn verified_process(
     pid: u32,
-    expected: &Path,
+    expected: Option<&Path>,
     session: u32,
     user: &str,
     extra: windows::Win32::System::Threading::PROCESS_ACCESS_RIGHTS,
@@ -485,26 +491,30 @@ fn verified_process(
     if session_of(pid)? != session {
         return Err(failure("输入代理会话不匹配"));
     }
-    let mut image = vec![0_u16; 32768];
-    let mut len = image.len() as u32;
-    // SAFETY: 只读查询映像名称，长度不超过实际缓冲区。
-    unsafe {
-        QueryFullProcessImageNameW(
-            process.0,
-            PROCESS_NAME_WIN32,
-            PWSTR(image.as_mut_ptr()),
-            &mut len,
-        )
-    }
-    .map_err(|e| os("核验输入代理映像", e))?;
-    let image = canonical(Path::new(&String::from_utf16_lossy(&image[..len as usize])))?;
-    if !image
-        .as_os_str()
-        .to_string_lossy()
-        .eq_ignore_ascii_case(&expected.as_os_str().to_string_lossy())
-        || process_sid(process.0)? != user
-    {
+    if process_sid(process.0)? != user {
         return Err(failure("拒绝未经授权的输入代理进程"));
+    }
+    if let Some(expected) = expected {
+        let mut image = vec![0_u16; 32768];
+        let mut len = image.len() as u32;
+        // SAFETY: 只读查询映像名称，长度不超过实际缓冲区。
+        unsafe {
+            QueryFullProcessImageNameW(
+                process.0,
+                PROCESS_NAME_WIN32,
+                PWSTR(image.as_mut_ptr()),
+                &mut len,
+            )
+        }
+        .map_err(|e| os("核验输入代理映像", e))?;
+        let image = canonical(Path::new(&String::from_utf16_lossy(&image[..len as usize])))?;
+        if !image
+            .as_os_str()
+            .to_string_lossy()
+            .eq_ignore_ascii_case(&expected.as_os_str().to_string_lossy())
+        {
+            return Err(failure("拒绝未经授权的输入代理进程"));
+        }
     }
     Ok(process)
 }

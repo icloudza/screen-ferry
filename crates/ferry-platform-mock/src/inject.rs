@@ -26,6 +26,7 @@ struct State {
     verified: Vec<InputProof>,
     ended: u64,
     local_pointer: Option<(ferry_types::Point, bool)>,
+    challenge_broken: bool,
 }
 
 impl MockInject {
@@ -38,6 +39,11 @@ impl MockInject {
         let mut state = self.lock();
         state.authorization = authorization;
         state.verifier = None;
+    }
+
+    /// 模拟安全输入服务出了故障：问它要挑战时一直失败。
+    pub fn break_remote_challenge(&self) {
+        self.lock().challenge_broken = true;
     }
 
     pub fn verified_inputs(&self) -> Vec<InputProof> {
@@ -90,6 +96,9 @@ impl MockInject {
 impl InputInject for MockInject {
     fn remote_challenge(&mut self, peer: [u8; 32]) -> Result<Option<[u8; 32]>> {
         let mut state = self.lock();
+        if state.challenge_broken {
+            return Err(Error::Failed("测试中模拟的输入服务故障".into()));
+        }
         let Some(authorization) = state
             .authorization
             .clone()

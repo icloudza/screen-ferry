@@ -569,7 +569,14 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
             .cloned()
             .unwrap_or_else(|| DeviceSettings::new(server.to_hex()));
         self.drop_files = device.files;
-        let mut challenge = self.inject.remote_challenge(*server.as_bytes())?;
+        // 安全输入是可选的增强：问不到（服务没起来、代理暂时连不上）就按普通权限连接，不能让整条连接失败。
+        let mut challenge = self
+            .inject
+            .remote_challenge(*server.as_bytes())
+            .unwrap_or_else(|e| {
+                warn!("安全输入暂时用不了，这次按普通权限连接：{e}");
+                None
+            });
         self.secure_input = challenge.is_some();
         let mut caps = capabilities(config.clipboard && device.clipboard, config.command_key);
         if !self.secure_input {

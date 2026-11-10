@@ -15,6 +15,10 @@
 #define AppExe "screenferry.exe"
 #define SettingsExe "screenferry-settings.exe"
 #define ServiceExe "screenferry-service.exe"
+; 安全输入服务固定放在系统盘的这个目录，和 ScreenFerry 自己装在哪个盘无关（ADR 0015）。
+; 它以 SYSTEM 身份运行，所在目录必须是普通用户改不了的；其他盘的目录通常做不到。
+; 装在默认位置时，它和程序在同一个目录。
+#define ServiceDir "{autopf}\ScreenFerry"
 #define Repo "https://github.com/icloudza/screen-ferry"
 
 [Setup]
@@ -71,8 +75,8 @@ en.ServiceStatus=Configuring secure input…
 chs.ServiceStatus=正在设置安全桌面输入…
 en.ServiceStopFailed=Unable to stop secure input. Close ScreenFerry and try again.
 chs.ServiceStopFailed=无法停止安全输入。请关闭 ScreenFerry 后重试。
-en.ServiceConfigureFailed=Unable to configure secure input. Use the default installation folder or leave secure input unchecked and try again.
-chs.ServiceConfigureFailed=无法设置安全输入。请使用默认安装位置，或取消安全输入选项后重试。
+en.ServiceConfigureFailed=Couldn't turn on control of Windows permission prompts. Everything else works. Run the installer again to retry.
+chs.ServiceConfigureFailed=没能开启“操作 Windows 权限提示”，其余功能不受影响。可以重新运行安装包再试一次。
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
@@ -82,10 +86,16 @@ Name: "secureinput"; Description: "{cm:SecureInput}"; Flags: unchecked
 [InstallDelete]
 ; 设置界面整个换新，不留旧版本的资源文件。
 Type: filesandordirs; Name: "{app}\settings"
+; 以前的版本把服务程序放在程序目录里；现在它只在服务目录。两个目录是同一个时不删。
+Type: files; Name: "{app}\{#ServiceExe}"; Check: ServiceApart
+
+[UninstallDelete]
+; 程序装在别的盘时，服务目录里只有服务程序，卸载后把空目录也删掉。
+Type: dirifempty; Name: "{#ServiceDir}"
 
 [Files]
 Source: "{#SourceDir}\{#AppExe}"; DestDir: "{app}"; Flags: ignoreversion
-Source: "{#SourceDir}\{#ServiceExe}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SourceDir}\{#ServiceExe}"; DestDir: "{#ServiceDir}"; Flags: ignoreversion; Tasks: secureinput
 Source: "{#SourceDir}\settings\*"; DestDir: "{app}\settings"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
@@ -106,7 +116,7 @@ Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags
 [UninstallRun]
 ; 先请 ScreenFerry 正常退出（归还键鼠、松开按键），还在的再强行结束，然后删掉防火墙规则。
 Filename: "{app}\{#AppExe}"; Parameters: "quit"; Flags: runhidden waituntilterminated; RunOnceId: "QuitApp"
-Filename: "{app}\{#ServiceExe}"; Parameters: "remove"; Flags: runhidden waituntilterminated; RunOnceId: "RemoveInputService"; Check: HasInputService
+Filename: "{#ServiceDir}\{#ServiceExe}"; Parameters: "remove"; Flags: runhidden waituntilterminated skipifdoesntexist; RunOnceId: "RemoveInputService"; Check: HasInputService
 Filename: "{sys}\taskkill.exe"; Parameters: "/F /IM {#AppExe} /IM {#SettingsExe}"; Flags: runhidden waituntilterminated; RunOnceId: "KillApp"
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""{#AppName}"""; Flags: runhidden waituntilterminated; RunOnceId: "RemoveFirewallRule"
 
@@ -116,6 +126,8 @@ const
 
 var
   Running: Boolean;
+  { 服务目录已经准备好，可以登记服务。 }
+  ServiceReady: Boolean;
 
 { 安装前 ScreenFerry 是否在运行：它运行时在缓存目录里写着 ipc.json，退出时删掉。 }
 function WasRunning: Boolean;
@@ -133,7 +145,13 @@ var
   Command: String;
 begin
   Result := RegQueryStringValue(HKLM, 'SYSTEM\CurrentControlSet\Services\ScreenFerryInput', 'ImagePath', Command)
-    and (Pos(Lowercase(ExpandConstant('{app}\{#ServiceExe}')), Lowercase(Command)) > 0);
+    and (Pos(Lowercase(ExpandConstant('{#ServiceDir}\{#ServiceExe}')), Lowercase(Command)) > 0);
+end;
+
+{ 程序没有装在服务目录里（例如装在 D 盘）。 }
+function ServiceApart: Boolean;
+begin
+  Result := CompareText(RemoveBackslash(ExpandConstant('{app}')), RemoveBackslash(ExpandConstant('{#ServiceDir}'))) <> 0;
 end;
 
 { 安装前请正在运行的 ScreenFerry 退出，程序文件才能替换：
@@ -164,14 +182,13 @@ begin
       Exit;
     end;
   end;
-  { 在复制文件前验证/创建受保护的应用目录。 }
+  { 在复制文件前验证/创建受保护的服务目录。失败不拦安装：这一次不装服务，装完再提示。 }
+  ServiceReady := False;
   if SecureInputSelected then
   begin
-    if not Exec(ExpandConstant('{tmp}\{#ServiceExe}'), 'prepare "' + ExpandConstant('{app}') + '"', '', SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then
-    begin
-      Result := CustomMessage('ServiceConfigureFailed');
-      Exit;
-    end;
+    ServiceReady := Exec(ExpandConstant('{tmp}\{#ServiceExe}'), 'prepare "' + ExpandConstant('{#ServiceDir}') + '"', '', SW_HIDE, ewWaitUntilTerminated, Code) and (Code = 0);
+    if not ServiceReady then
+      Log('安全输入服务的目录没有准备好，退出码 ' + IntToStr(Code));
   end;
   Result := '';
 end;
@@ -188,7 +205,8 @@ begin
     { 服务这一步失败不让整个安装失败：键鼠共享、剪贴板和文件照常能用，只是权限提示还得在这台电脑上自己点。 }
     if SecureInputSelected then
     begin
-      if not Exec(ExpandConstant('{app}\{#ServiceExe}'), 'install', '', SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then
+      if not ServiceReady
+        or not Exec(ExpandConstant('{#ServiceDir}\{#ServiceExe}'), 'install', '', SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then
       begin
         Log('安全输入服务没有装上，退出码 ' + IntToStr(Code));
         SuppressibleMsgBox(CustomMessage('ServiceConfigureFailed'), mbError, MB_OK, IDOK);
@@ -196,9 +214,14 @@ begin
     end
     else if HasInputService then
     begin
-      { 这次没选：去掉以前装的服务和它的授权。 }
+      { 这次没选：去掉以前装的服务和它的授权，再删掉服务程序；服务目录空了就一并删掉。 }
       if not Exec(ExpandConstant('{tmp}\{#ServiceExe}'), 'remove', '', SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then
-        Log('安全输入服务没有移除干净，退出码 ' + IntToStr(Code));
+        Log('安全输入服务没有移除干净，退出码 ' + IntToStr(Code))
+      else
+      begin
+        DeleteFile(ExpandConstant('{#ServiceDir}\{#ServiceExe}'));
+        RemoveDir(ExpandConstant('{#ServiceDir}'));
+      end;
     end;
   end;
 end;
