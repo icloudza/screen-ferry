@@ -51,6 +51,12 @@ impl Host for MockHost {
     fn device_name(&self) -> String {
         "测试 Mac".into()
     }
+    fn platform(&self) -> &'static str {
+        "test"
+    }
+    fn edge_drop(&self) -> bool {
+        true
+    }
     fn check_permissions(&self, _role: Role) -> ferry_platform::Result<()> {
         if self.deny_permissions.load(Ordering::SeqCst) {
             Err(PlatformError::PermissionDenied("测试中拒绝"))
@@ -357,9 +363,10 @@ async fn first_pairing_is_confirmed_in_the_ui() {
             server: ServerAddr::Fixed(([127, 0, 0, 1], port).into()),
             name: "pc".into(),
             clipboard: true,
-
             clipboard_limit: Default::default(),
+            platform: "test",
             command_key: false,
+            edge_drop: true,
             store: pc.store.clone(),
             events: Events::none(),
             files: Files::new(&pc.store, Events::none()),
@@ -623,9 +630,10 @@ async fn pairing_with_no_ui_open_opens_the_settings() {
             server: ServerAddr::Fixed(([127, 0, 0, 1], port).into()),
             name: "pc".into(),
             clipboard: false,
-
             clipboard_limit: Default::default(),
+            platform: "test",
             command_key: false,
+            edge_drop: true,
             store: pc.store.clone(),
             events: Events::none(),
             files: Files::new(&pc.store, Events::none()),

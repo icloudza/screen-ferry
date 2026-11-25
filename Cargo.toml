@@ -18,6 +18,7 @@ ferry-trust = { path = "crates/ferry-trust" }
 ferry-platform = { path = "crates/ferry-platform" }
 ferry-platform-windows = { path = "crates/ferry-platform-windows" }
 ferry-platform-macos = { path = "crates/ferry-platform-macos" }
+ferry-platform-linux = { path = "crates/ferry-platform-linux" }
 ferry-platform-mock = { path = "crates/ferry-platform-mock" }
 ferry-net = { path = "crates/ferry-net" }
 ferry-store = { path = "crates/ferry-store" }
@@ -48,10 +49,17 @@ tokio-rustls = { version = "0.26.4", default-features = false, features = ["ring
 toml = "0.9"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["ansi", "fmt", "std"] }
+tempfile = "3.23"
 tray-icon = { version = "0.26.1", default-features = false }
 ureq = { version = "3.5.0", default-features = false, features = ["rustls-no-provider", "platform-verifier"] }
 
 # ── 平台 ────────────────────────────────────
+calloop = { version = "0.14.5", features = ["signals"] }
+wayland-backend = "0.3.17"
+wayland-client = "0.31.15"
+wayland-protocols = { version = "0.32.13", default-features = false, features = ["client"] }
+wayland-protocols-wlr = { version = "0.3.12", default-features = false, features = ["client"] }
+wayland-scanner = "0.31.11"
 dispatch2 = { version = "0.3.1", default-features = false, features = ["std"] }
 objc2 = { version = "0.6.4", default-features = false, features = ["std"] }
 objc2-app-kit = { version = "0.3.2", default-features = false, features = [

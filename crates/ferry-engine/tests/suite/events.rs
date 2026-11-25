@@ -10,6 +10,8 @@ async fn a_session_reports_its_lifecycle_on_both_sides() {
     let rig = Rig::with(Setup {
         mac_events,
         pc_events,
+        mac_platform: "macos",
+        pc_platform: "linux",
         ..Setup::default()
     })
     .await;
@@ -28,6 +30,24 @@ async fn a_session_reports_its_lifecycle_on_both_sides() {
         )
     })
     .await;
+    eventually("两边都报告对端系统", || {
+        has(
+            &mac,
+            |e| matches!(e, Event::PeerPlatform { platform, .. } if platform == "linux"),
+        ) && has(
+            &pc,
+            |e| matches!(e, Event::PeerPlatform { platform, .. } if platform == "macos"),
+        )
+    })
+    .await;
+    assert!(has(&mac, |e| matches!(
+        e,
+        Event::Connected { platform: None, .. }
+    )));
+    assert!(has(&pc, |e| matches!(
+        e,
+        Event::Connected { platform: None, .. }
+    )));
     // 首次连接要配对，两边都记下了对方。
     assert!(has(&mac, |e| matches!(e, Event::Paired { .. })));
     assert!(has(&pc, |e| matches!(e, Event::Paired { .. })));

@@ -8,7 +8,7 @@
 
 ## 1. 项目概述
 
-ScreenFerry 是跨 Windows 和 macOS 的键鼠共享工具，同时提供剪贴板与文件同步，定位类似 Deskflow。
+ScreenFerry 是跨 Windows、macOS 和 Arch Linux（niri / Wayland）的键鼠共享工具，同时提供剪贴板与文件同步，定位类似 Deskflow。
 
 目标：**低内存、稳定、易扩展**。
 
@@ -21,9 +21,10 @@ ScreenFerry 是跨 Windows 和 macOS 的键鼠共享工具，同时提供剪贴�
 | 发现与配对 | mDNS 发现；配对码配对；配对后固定对方证书 |
 | 进程模型 | 后台常驻（含托盘）；设置界面为独立进程，按需启动，关闭即退出 |
 | 界面 | Flutter（自定义设计，见 ADR 0003）；工程在 `app/`，直接经本机通信连接后台（ADR 0004） |
-| 托盘 | tray-icon |
+| 托盘 | tray-icon；Linux 使用 KSNI / StatusNotifierItem |
 | Windows | windows-rs + Win32 API |
 | macOS | objc2 系列 crate |
+| Linux | Wayland 客户端协议 + calloop；面向 niri，剪贴板经 `wl-clipboard` |
 | 存储 | TOML 配置 + SQLite；图片和文件存磁盘 |
 | 本机进程通信 | 本机回环 TCP（`127.0.0.1`）+ 令牌，每行一条 JSON；协议见 `docs/ipc.md`（ADR 0004） |
 | 版本更新 | GitHub Releases 上的安装包和 minisign 签名的更新清单；macOS 交换应用，Windows 静默运行安装包（ADR 0014） |
@@ -91,6 +92,7 @@ crates/
 │  ── L2 适配层（对接操作系统、网络、磁盘、进程）───────
 ├─ ferry-platform-windows
 ├─ ferry-platform-macos
+├─ ferry-platform-linux
 ├─ ferry-platform-mock      # 测试用的假平台，可以注入按键、记录输出
 ├─ ferry-net                # TCP + rustls、输入/数据双连接、心跳、重连、mDNS
 ├─ ferry-store              # 配置文件、SQLite、数据目录管理
@@ -101,10 +103,6 @@ crates/
 ├─ ferry-daemon             # → screenferry：后台常驻 + 托盘
 └─ ferry-service            # → screenferry-service：Windows 安全输入服务（可选，ADR 0015）
 ```
-
-按规则预留、尚未创建的 crate：
-
-- `ferry-platform-linux`（L2）
 
 ## 5. 依赖规则
 
@@ -151,7 +149,7 @@ crates/ferry-xxx/
 `ferry-platform` 与每个平台实现使用完全相同的文件名，与 trait 一一对应：
 
 ```
-ferry-platform/src/              ferry-platform-{windows,macos,mock}/src/
+ferry-platform/src/              ferry-platform-{windows,macos,linux,mock}/src/
 ├─ capture.rs     InputCapture   ├─ capture.rs
 ├─ inject.rs      InputInject    ├─ inject.rs
 ├─ keymap.rs      HID ⇄ 本地键码  ├─ keymap.rs
@@ -202,6 +200,7 @@ ferry-platform/src/              ferry-platform-{windows,macos,mock}/src/
 ```
 数据目录   macOS:   ~/Library/Application Support/ScreenFerry/
           Windows: %APPDATA%\ScreenFerry\
+          Linux:   ${XDG_DATA_HOME:-~/.local/share}/screenferry/
 ├─ config.toml       # 第一行 schema_version = 1，以后靠它做迁移
 ├─ peers.toml        # 已信任的设备
 ├─ identity/         # device.key、device.crt（只有当前用户可读）
@@ -210,6 +209,7 @@ ferry-platform/src/              ferry-platform-{windows,macos,mock}/src/
 
 缓存目录   macOS:   ~/Library/Caches/ScreenFerry/
           Windows: %LOCALAPPDATA%\ScreenFerry\
+          Linux:   ${XDG_CACHE_HOME:-~/.cache}/screenferry/
 ├─ ipc.json          # 后台运行时写下的端口与令牌，退出时删除（ADR 0004）
 ├─ logs/
 ├─ partial/          # 传输中的分块，可以随时清空

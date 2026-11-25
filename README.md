@@ -8,7 +8,7 @@
 
 English | [简体中文](README.zh-CN.md)
 
-One keyboard and mouse for several computers. ScreenFerry shares a keyboard and mouse between your computers, Mac or Windows in any combination, syncs the clipboard and sends files, all over TLS 1.3.
+One keyboard and mouse for several computers. ScreenFerry shares a keyboard and mouse between your computers, macOS, Windows or Arch Linux (niri) in any combination, syncs the clipboard and sends files, all over TLS 1.3.
 
 ## Features
 
@@ -20,7 +20,7 @@ One keyboard and mouse for several computers. ScreenFerry shares a keyboard and 
 - **Secure**: confirm a 6-digit pairing code the first time, then only the paired certificate fingerprint is trusted.
 - **Easy to connect**: automatic discovery on the local network. Where discovery is blocked, connect by address or invite from the controlling computer.
 - **Lightweight**: a Rust background service in the tray. The settings window starts on demand and exits when closed.
-- **Automatic updates**: checks once a day, downloads in the background, and installs when you choose Restart to Update. Every update is signature-checked first.
+- **Automatic updates (macOS and Windows)**: checks once a day, downloads in the background, and installs when you choose Restart to Update. Every update is signature-checked first. Linux builds are updated with your package manager or rebuilt from source.
 - **English and Chinese**: the settings window, tray menu and installer come in English and Simplified Chinese. They follow the system language, and you can switch in Settings → Appearance.
 
 ## How it works
@@ -65,8 +65,13 @@ sequenceDiagram
 |---|---|
 | macOS | Download `ScreenFerry-<version>-macos-universal.dmg` from [Releases](https://github.com/icloudza/screen-ferry/releases/latest), open it and drag ScreenFerry into Applications. On first launch, allow ScreenFerry in System Settings → Privacy & Security → Accessibility. |
 | Windows | Download `ScreenFerry-<version>-windows-x64-setup.exe` from [Releases](https://github.com/icloudza/screen-ferry/releases/latest) and run it. |
+| Arch Linux / niri | Build from source for now; there is no pacman/AUR package or graphical installer yet. Install the dependencies listed below, then run `cargo xtask bundle` in the repository root. Run `target/bundle/linux/ScreenFerry/screenferry`, or copy the whole directory to `~/.local/opt/ScreenFerry/` for portable use. The tray uses KSNI, so the desktop needs a StatusNotifierItem host such as Waybar. Linux uses Wayland protocols directly and does not need root or evdev access. |
 
-ScreenFerry checks for updates once a day and downloads them in the background. Choose Restart to Update when it suits you; you can turn automatic checks off in Settings → About. Updates are verified against a built-in signing key before anything is installed.
+Linux currently supports keyboard/mouse sharing, clipboard sync and command-line file sending. Edge drag-and-drop and in-app updates are not available yet; send files with `screenferry send` and update through your package manager or rebuild. The niri session must expose the wlr virtual-pointer (`zwlr_virtual_pointer_manager_v1`), virtual-keyboard (`zwp_virtual_keyboard_manager_v1`), layer-shell, relative-pointer, pointer-constraints and keyboard-shortcuts-inhibit (`zwp_keyboard_shortcuts_inhibit_manager_v1`) protocols. During capture, ordinary niri global shortcuts are forwarded to the remote computer. Configure `Mod+Escape allow-inhibiting=false { toggle-keyboard-shortcuts-inhibit; }` as an escape hatch that immediately returns control to the local computer.
+
+Input-sharing validation on 2026-11-25 used Arch Linux x86_64 (`7.3.4-arch1-1`, niri `v26.04-322-g2fbc6f3b-modified`) and macOS 15.8.3 on a MacBook Pro. Bidirectional edge switching and repeated round trips passed with single 1920×1080 displays at 100% scale. See the [test record](docs/handoff-linux-macos.md#6-实机验证记录2026-11-25) for toolchain versions and the remaining untested scope.
+
+On macOS and Windows, ScreenFerry checks for updates once a day and downloads them in the background. Choose Restart to Update when it suits you; you can turn automatic checks off in Settings → About. Updates are verified against a built-in signing key before anything is installed. Linux does not offer in-app updates.
 
 About the Windows installer:
 
@@ -101,21 +106,27 @@ See `screenferry --help` for all options. The command line and diagnostics log a
 
 ### Where data lives
 
-| | macOS | Windows |
-|---|---|---|
-| Settings, pairings | `~/Library/Application Support/ScreenFerry/` | `%APPDATA%\ScreenFerry\` |
-| Logs, runtime files | `~/Library/Caches/ScreenFerry/` | `%LOCALAPPDATA%\ScreenFerry\` |
+| | macOS | Windows | Linux |
+|---|---|---|---|
+| Settings, pairings | `~/Library/Application Support/ScreenFerry/` | `%APPDATA%\ScreenFerry\` | `${XDG_DATA_HOME:-~/.local/share}/screenferry/` |
+| Logs, runtime files | `~/Library/Caches/ScreenFerry/` | `%LOCALAPPDATA%\ScreenFerry\` | `${XDG_CACHE_HOME:-~/.cache}/screenferry/` |
 
 ## Build from source
 
 You need Rust (the version is pinned in `rust-toolchain.toml` and installed by rustup) and Flutter 3.47.
-macOS also needs Xcode; Windows also needs Visual Studio 2022 (Desktop development with C++) and [Inno Setup](https://jrsoftware.org/isdl.php) 7.1 or later.
+On Arch Linux, install the compiler and build tools, GTK 3 development files, and the clipboard/file-opening helpers:
+
+```bash
+sudo pacman -S --needed base-devel clang cmake ninja pkgconf gtk3 wl-clipboard xdg-utils
+```
+
+Linux input support targets the niri Wayland compositor and uses KSNI rather than AppIndicator. macOS also needs Xcode; Windows also needs Visual Studio 2022 (Desktop development with C++) and [Inno Setup](https://jrsoftware.org/isdl.php) 7.1 or later.
 
 ```bash
 cargo xtask bundle
 ```
 
-It builds for the system it runs on and puts the result in `target/bundle/`: `ScreenFerry.app` and its update package `ScreenFerry-<version>-macos-<arch>.zip` on macOS (add `--dmg` for the installer disk), `ScreenFerry-<version>-windows-x64-setup.exe` on Windows. Releases are made with `cargo xtask release <version>`; see ADR 0014.
+It builds for the system it runs on and puts the result in `target/bundle/`: `ScreenFerry.app` and its update package `ScreenFerry-<version>-macos-<arch>.zip` on macOS (add `--dmg` for the installer disk), `ScreenFerry-<version>-windows-x64-setup.exe` on Windows, or the ready-to-run `linux/ScreenFerry/` directory on Linux. Releases are made with `cargo xtask release <version>`; see ADR 0014.
 On macOS the app is signed with a Developer ID certificate from the keychain when there is one (or the one named by `SCREENFERRY_SIGN_IDENTITY`). Otherwise it gets an ad-hoc signature, and Accessibility permission has to be granted again after every rebuild.
 
 ## Development
@@ -131,7 +142,7 @@ flowchart TB
   end
   subgraph L2["L2 Adapters"]
     direction LR
-    pm["platform-macos"] ~~~ pw["platform-windows"] ~~~ net["net"] ~~~ store["store"] ~~~ ipc["ipc"]
+    pm["platform-macos"] ~~~ pw["platform-windows"] ~~~ pl["platform-linux"] ~~~ net["net"] ~~~ store["store"] ~~~ ipc["ipc"]
   end
   subgraph L1["L1 Pure logic"]
     direction LR
@@ -159,6 +170,7 @@ The engineering docs are written in Chinese:
 | [AGENTS.md](AGENTS.md) | Engineering rules: layout, layers, naming, tests |
 | [docs/architecture.md](docs/architecture.md) | Architecture overview and crate dependencies |
 | [docs/protocol.md](docs/protocol.md) | Wire protocol |
+| [docs/handoff-linux-macos.md](docs/handoff-linux-macos.md) | Linux / niri and macOS build, install, and interoperability handoff |
 | [docs/ipc.md](docs/ipc.md) | Local IPC between the settings window and the background service |
 | [docs/adr/](docs/adr/) | Architecture decision records |
 

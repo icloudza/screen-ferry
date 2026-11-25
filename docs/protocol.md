@@ -85,6 +85,7 @@
   - `PeerSide`、`DropHint` 需要 `EDGE_DROP`
   - `OpenSettings` 需要 `REMOTE_SETTINGS`
   - `AppInfo` 需要 `APP_INFO`：输入连接握手后，双方各发一次自己的程序版本（ADR 0014）
+  - `PlatformInfo` 需要 `PLATFORM_INFO`（bit 9）：握手后双方各发一次本机系统标识；旧版对端没有此能力时不发送，界面将系统显示为未知
   - `InputBlocked` 需要 `INPUT_BLOCKED`（bit 8）：被控端收不了键鼠时请控制端收回光标，连接保持。对方没有这项能力时，被控端只能结束会话。
   - `SecureChallenge`、`SecureInput` 需要 `SECURE_INPUT`（bit 7）：只有管理员另行授权远端的被控端才声明此能力。
 - `COMMAND_KEY` 说明发送方的快捷键以 Command 键为主（macOS），不是一项能力。服务端看客户端 `Hello` 里的这一位：
@@ -142,6 +143,7 @@
 | `0x0107` | SecureChallenge | 输入 | `nonce [32]`，需要 `SECURE_INPUT` |
 | `0x0108` | SecureInput | 输入 | `challenge [32]` · `sequence u64` · `body [32]` · `signature [64]`，需要 `SECURE_INPUT` |
 | `0x0109` | InputBlocked | 输入 | 空，需要 `INPUT_BLOCKED`；被控端发给控制端 |
+| `0x010A` | PlatformInfo | 输入 | `platform str`，最多 16 字节，需要 `PLATFORM_INFO` |
 | `0x0110` | Key | 输入 | `code u32` · `action u8` |
 | `0x0120` | PointerMotion | 输入 | `position Point` |
 | `0x0121` | PointerDelta | 输入 | `dx i32` · `dy i32` |
@@ -178,7 +180,7 @@
 | 字段 | 取值 |
 |---|---|
 | `channel` | 1 输入，2 数据，3 配对，4 文件，5 邀请 |
-| `capabilities` | 位 0 `RELATIVE_POINTER`，位 1 `CLIPBOARD`，位 2 `FILES`，位 3 `EDGE_DROP`，位 4 `COMMAND_KEY`，位 5 `REMOTE_SETTINGS`，位 6 `APP_INFO`，位 7 `SECURE_INPUT`，位 8 `INPUT_BLOCKED`；未知位保留，协商时自然被交集去掉 |
+| `capabilities` | 位 0 `RELATIVE_POINTER`，位 1 `CLIPBOARD`，位 2 `FILES`，位 3 `EDGE_DROP`，位 4 `COMMAND_KEY`，位 5 `REMOTE_SETTINGS`，位 6 `APP_INFO`，位 7 `SECURE_INPUT`，位 8 `INPUT_BLOCKED`，位 9 `PLATFORM_INFO`；未知位保留，协商时自然被交集去掉 |
 | `side` | 1 左，2 右，3 上，4 下 |
 | DropHint `state` | 0 收起，1 靠近，2 在胶囊上 |
 | `along` | 沿相邻那条边的位置，0–10000（左右边从上往下，上下边从左往右） |
@@ -213,13 +215,17 @@
 
 ### 坐标
 
-所有坐标都使用**接收方**的桌面坐标系：macOS 为点（point），Windows 为物理像素。接收方用 `Displays` 声明自己的坐标系。会话中途显示器布局变了（改分辨率、缩放、插拔显示器）时再发一次 `Displays`，对方以最新的一份为准。`Button` 和 `Wheel` 带上当时的光标位置，接收方先移动光标再执行。
+所有坐标都使用**接收方**的桌面坐标系：macOS 为点（point），Windows 为物理像素，Linux 为逻辑像素。接收方用 `Displays` 声明自己的坐标系。会话中途显示器布局变了（改分辨率、缩放、插拔显示器）时再发一次 `Displays`，对方以最新的一份为准。`Button` 和 `Wheel` 带上当时的光标位置，接收方先移动光标再执行。
+
+### 对端系统
+
+双方协商 `PLATFORM_INFO` 后，在输入连接握手后各发一次 `PlatformInfo`。`platform` 是小写系统标识：`macos`、`windows` 或 `linux`，最多 16 个 UTF-8 字节。它只用于界面显示和选择平台相关的按键文案，不参与配对、信任或输入鉴权；连接事件本身不携带系统，系统由后续消息告知。对方没有此能力时保持未知，不影响键鼠、剪贴板和文件传输。
 
 ### 签署输入（需要 `SECURE_INPUT`）
 
 `0x0107 SecureChallenge` 的消息体为随机数 `[32]`；`0x0108 SecureInput` 为
 `challenge [32] · sequence u64 · body [32] · signature [64]`，只能出现在输入连接。
-双方协商 `SECURE_INPUT` 后，客户端先发 `Displays`、紧接第一条 `SecureChallenge`，再发可选的 `AppInfo`。
+双方协商 `SECURE_INPUT` 后，客户端先发 `Displays`、紧接第一条 `SecureChallenge`，再发可选的 `AppInfo` 和 `PlatformInfo`。
 服务端取得初始挑战后才启动该会话的输出。后续挑战经输入连接更新，不重置序号。
 
 `body` 为动作的原消息类型号 `u16` 加原消息体，再以零补足 32 字节；只允许 `Enter`、`Leave` 和键鼠 `Input`。

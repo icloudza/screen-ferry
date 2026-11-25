@@ -130,6 +130,55 @@ async fn control_returns_when_the_client_disconnects() {
 }
 
 #[tokio::test]
+async fn losing_local_focus_returns_control_and_releases_remote_keys() {
+    let rig = Rig::start().await;
+    rig.enter().await;
+    rig.key(KeyCode::LEFT_GUI, KeyAction::Down);
+    rig.key(KeyCode::keyboard(0x04), KeyAction::Down);
+    eventually("客户端收到按下的键", || {
+        rig.inject.events().len() >= 3
+    })
+    .await;
+
+    rig.capture.emit(CaptureEvent::FocusLost);
+    eventually("焦点丢失后交还控制", || !rig.capture.is_grabbed()).await;
+    assert_eq!(rig.capture.last_release(), Some(RETURN));
+    eventually("客户端收到 Leave 并松开按键", || {
+        rig.inject.events().len() >= 5
+    })
+    .await;
+    assert_eq!(
+        rig.inject.events()[3..],
+        [
+            key(KeyCode::keyboard(0x04), KeyAction::Up),
+            key(KeyCode::LEFT_CTRL, KeyAction::Up),
+        ],
+    );
+    assert!(!rig.client.is_finished(), "焦点丢失不能断开会话");
+    assert!(!rig.server.is_finished(), "焦点丢失不能停止服务端");
+
+    rig.enter().await;
+    rig.key(KeyCode::keyboard(0x04), KeyAction::Down);
+    rig.key(KeyCode::keyboard(0x04), KeyAction::Up);
+    eventually("再次进入后键盘仍可转发", || {
+        rig.inject.events().len() >= 8
+    })
+    .await;
+    assert!(!rig.client.is_finished(), "重新进入后会话仍保持连接");
+}
+
+#[tokio::test]
+async fn a_stale_focus_loss_does_not_interrupt_a_new_switch() {
+    let rig = Rig::start().await;
+    rig.enter().await;
+    rig.leave().await;
+    rig.capture.emit_stale(CaptureEvent::FocusLost);
+    rig.enter().await;
+    assert!(rig.capture.is_grabbed(), "过时的焦点丢失没有打断新切换");
+    assert!(!rig.client.is_finished(), "新切换的会话仍保持连接");
+}
+
+#[tokio::test]
 async fn input_from_before_a_switch_is_not_replayed_after_it() {
     let rig = Rig::start().await;
     rig.enter().await;

@@ -78,6 +78,7 @@ pub(crate) fn run(args: &[String]) -> Result {
     match std::env::consts::OS {
         "macos" => macos(&root, &options),
         "windows" => windows(&root, &options),
+        "linux" => linux(&root),
         other => Err(format!("还不支持在 {other} 上打包")),
     }
 }
@@ -154,6 +155,33 @@ fn windows(root: &Path, _options: &Options) -> Result {
         "  不安装直接试：双击 {}",
         out.join("screenferry.exe").display()
     );
+    Ok(())
+}
+
+fn linux(root: &Path) -> Result {
+    let arch = match std::env::consts::ARCH {
+        "x86_64" => "x64",
+        "aarch64" => "arm64",
+        other => return Err(format!("暂不支持 Linux {other}")),
+    };
+    step("编译后台（release）");
+    cargo(root, &["build", "--release", "-p", "ferry-daemon"])?;
+    step("编译设置界面（flutter build linux --release）");
+    let app_dir = root.join("app");
+    flutter(&app_dir, &["build", "linux", "--release"])?;
+    let built = app_dir.join(format!("build/linux/{arch}/release/bundle"));
+    let out = root.join("target/bundle/linux/ScreenFerry");
+    if out.exists() {
+        fs::remove_dir_all(&out).map_err(|e| io(&out, e))?;
+    }
+    fs::create_dir_all(&out).map_err(|e| io(&out, e))?;
+    copy(
+        &root.join("target/release/screenferry"),
+        &out.join("screenferry"),
+    )?;
+    copy_dir(&built, &out)?;
+    println!("\n✓ {}", out.display());
+    println!("  直接运行：{}", out.join("screenferry").display());
     Ok(())
 }
 

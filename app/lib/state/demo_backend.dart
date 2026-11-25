@@ -114,7 +114,12 @@ class DemoBackend implements Backend {
     accent: 0,
   );
 
-  String get _localName => role == Role.server ? 'Mac Studio' : '办公室 PC';
+  String get _localName => switch (platform) {
+    'macos' => 'Mac Studio',
+    'windows' => '办公室 PC',
+    'linux' => 'Arch 主机',
+    _ => '本机',
+  };
 
   /// 连接摘要指向的那台：光标所在的，否则最近连上的，再否则第一台在线的。
   PeerInfo? get _linkPeer {
@@ -127,7 +132,14 @@ class DemoBackend implements Backend {
   }
 
   String get _peerName =>
-      _shown(_linkPeer) ?? _shown(_peers.firstOrNull) ?? (role == Role.server ? '办公室 PC' : 'Mac Studio');
+      _shown(_linkPeer) ??
+      _shown(_peers.firstOrNull) ??
+      switch (platform) {
+        'macos' => role == Role.server ? '办公室 PC' : 'Mac Studio',
+        'windows' => role == Role.server ? '办公室 PC' : 'Mac Studio',
+        'linux' => role == Role.server ? '办公室 PC' : 'Mac Studio',
+        _ => '对方',
+      };
 
   /// 一台设备显示的名字：起过名字就用起的，和后台一样。
   String? _shown(PeerInfo? p) {
@@ -242,9 +254,12 @@ class DemoBackend implements Backend {
       case ExportDiagnosticsRequest():
         emit(
           DiagnosticsExportedNotice(
-            path: platform == 'macos'
-                ? '/Users/me/Downloads/ScreenFerry-诊断-20261102-0624.txt'
-                : r'C:\Users\me\Downloads\ScreenFerry-诊断-20261102-0624.txt',
+            path: switch (platform) {
+              'macos' => '/Users/me/Downloads/ScreenFerry-诊断-20261102-0624.txt',
+              'windows' => r'C:\Users\me\Downloads\ScreenFerry-诊断-20261102-0624.txt',
+              'linux' => '/home/me/Downloads/ScreenFerry-诊断-20261102-0624.txt',
+              _ => '/Downloads/ScreenFerry-诊断-20261102-0624.txt',
+            },
             bytes: 421888,
           ),
         );
@@ -454,15 +469,23 @@ class DemoBackend implements Backend {
         fingerprint: _fp('local'),
         short: '7AB0-5CB2-38FB-D603',
         role: role,
-        dataDir: role == Role.server
-            ? '~/Library/Application Support/ScreenFerry'
-            : r'C:\Users\me\AppData\Roaming\ScreenFerry',
+        dataDir: switch (platform) {
+          'macos' => '~/Library/Application Support/ScreenFerry',
+          'windows' => r'C:\Users\me\AppData\Roaming\ScreenFerry',
+          'linux' => '~/.local/share/screenferry',
+          _ => '',
+        },
         version: '0.1.0',
         platform: platform,
         naturalScrolling: platform == 'macos' ? true : null,
         addresses: role == Role.server ? const ['192.168.2.12'] : const ['192.168.2.18'],
         invitePort: role == Role.server ? null : 24811,
-        system: platform == 'macos' ? 'macOS 15.6 · arm64' : 'Windows 11（10.0.26100.4652）· x64',
+        system: switch (platform) {
+          'macos' => 'macOS 15.6 · arm64',
+          'windows' => 'Windows 11（10.0.26100.4652）· x64',
+          'linux' => 'Arch Linux · x86_64 · niri',
+          _ => '',
+        },
         verboseSince: _verboseSince,
       ),
       sharing: _sharing,
@@ -508,8 +531,11 @@ class DemoBackend implements Backend {
             side: role == Role.server ? arrangement.placeOf(p.fingerprint)?.side : null,
             cursor: connected && p.online && _cursor == p.fingerprint,
             alias: _settings.device(p.fingerprint).alias,
-            // 演示里对方总是和本机不同的系统。
-            platform: platform == 'macos' ? 'windows' : 'macos',
+            platform: switch (platform) {
+              'macos' => 'windows',
+              'windows' || 'linux' => 'macos',
+              _ => '',
+            },
             version: p.online ? '0.1.0' : '',
             addr: switch ((p.online || p.lastSeen != null, role)) {
               (false, _) => '',
@@ -650,8 +676,8 @@ class DemoBackend implements Backend {
     ScreenSide.bottom => '下方',
   };
 
-  static List<RunLogLine> _demoRunLog() => const [
-    RunLogLine(at: '06:12:03', level: RunLogLevel.info, text: 'ScreenFerry 0.1.0 已启动 · Mac Studio · 键鼠在本机'),
+  List<RunLogLine> _demoRunLog() => [
+    RunLogLine(at: '06:12:03', level: RunLogLevel.info, text: 'ScreenFerry 0.1.0 已启动 · $_localName · 键鼠在本机'),
     RunLogLine(at: '06:12:03', level: RunLogLevel.info, text: '等待客户端连接 addr=0.0.0.0:24810'),
     RunLogLine(at: '06:12:04', level: RunLogLevel.info, text: '客户端已连接 peer=办公室 PC'),
     RunLogLine(at: '06:12:04', level: RunLogLevel.info, text: '已连接 办公室 PC TLS 1.3 · 192.168.2.18'),

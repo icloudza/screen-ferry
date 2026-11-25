@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use ferry_proto::limits::{MAX_CHUNK_LEN, MAX_DISPLAYS, MAX_NAME_LEN};
+use ferry_proto::limits::{MAX_CHUNK_LEN, MAX_DISPLAYS, MAX_NAME_LEN, MAX_PLATFORM_LEN};
 use ferry_proto::{Capabilities, Channel, Chunk, Codec, DecodeError, EncodeError, Hello, Message};
 use ferry_types::{Display, DisplayId, InputEvent, KeyAction, KeyCode, Point, Rect};
 
@@ -26,6 +26,7 @@ fn kind(message: &Message) -> &'static str {
         Message::OpenSettings => "OpenSettings",
         Message::InputBlocked => "InputBlocked",
         Message::AppInfo { .. } => "AppInfo",
+        Message::PlatformInfo { .. } => "PlatformInfo",
         Message::Input(event) => match event {
             InputEvent::Key { .. } => "Key",
             InputEvent::PointerMotion { .. } => "PointerMotion",
@@ -51,7 +52,7 @@ fn kind(message: &Message) -> &'static str {
     }
 }
 
-const MESSAGE_KINDS: usize = 37;
+const MESSAGE_KINDS: usize = 38;
 
 fn decode(channel: Channel, buf: &[u8]) -> Result<Option<(Message, usize)>, DecodeError> {
     Codec::new(channel).decode(buf)
@@ -163,6 +164,42 @@ fn enforces_name_limit_both_ways() {
     assert_eq!(
         decode(Channel::Input, &frame(0x0001, &payload)),
         Err(DecodeError::LimitExceeded("设备名长度")),
+    );
+}
+
+#[test]
+fn platform_info_is_bounded_and_input_only() {
+    let codec = Codec::new(Channel::Input);
+    let platform = |value: &str| Message::PlatformInfo {
+        platform: value.to_owned(),
+    };
+    let mut buf = Vec::new();
+
+    assert!(codec.encode(&platform("macos"), &mut buf).is_ok());
+    assert_eq!(
+        Codec::new(Channel::Data).encode(&platform("linux"), &mut Vec::new()),
+        Err(EncodeError::WrongChannel(Channel::Data)),
+    );
+    assert_eq!(
+        codec.encode(
+            &platform(&"x".repeat(MAX_PLATFORM_LEN + 1)),
+            &mut Vec::new()
+        ),
+        Err(EncodeError::LimitExceeded("系统标识长度")),
+    );
+
+    let len = (MAX_PLATFORM_LEN as u16 + 1).to_le_bytes();
+    let payload = [&len[..], &[b'x'; MAX_PLATFORM_LEN + 1]].concat();
+    assert_eq!(
+        decode(Channel::Input, &frame(0x010A, &payload)),
+        Err(DecodeError::LimitExceeded("系统标识长度")),
+    );
+    assert_eq!(
+        decode(Channel::Data, &encode(Channel::Input, &platform("linux"))),
+        Err(DecodeError::WrongChannel {
+            ty: 0x010A,
+            channel: Channel::Data,
+        }),
     );
 }
 

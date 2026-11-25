@@ -77,6 +77,7 @@ fn older_and_newer_peers_negotiate_down_to_what_both_understand() {
         .accept(Capabilities::all(), 1, "新版本")
         .expect("照常接受");
     assert_eq!(welcome.capabilities, v0_1_0);
+    assert!(!welcome.capabilities.contains(Capabilities::PLATFORM_INFO));
 
     // 将来的版本带着现在还不认识的能力位来连：不认识的位被交集去掉，照常接受。
     let future = Hello::new(

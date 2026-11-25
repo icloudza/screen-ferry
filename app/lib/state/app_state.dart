@@ -61,6 +61,31 @@ extension LogIconData on LogIcon {
   };
 }
 
+/// 后台报告的系统对应的图标；未知系统不冒充 Mac 或 Windows。
+IconData platformIconOf(String platform) => switch (platform) {
+  'macos' => Icons.desktop_mac_outlined,
+  'windows' => Icons.desktop_windows_outlined,
+  // Material 没有 Linux 专用桌面图标，用中性电脑图标。
+  'linux' => Icons.computer_outlined,
+  _ => Icons.devices_other_outlined,
+};
+
+/// 后台报告的系统显示给用户的名字。
+String platformLabelOf(String platform) => switch (platform) {
+  'macos' => 'macOS',
+  'windows' => 'Windows',
+  'linux' => 'Linux',
+  _ => 'Unknown',
+};
+
+enum KeyboardKind { mac, xkb, unknown }
+
+KeyboardKind keyboardKindOf(String platform) => switch (platform) {
+  'macos' => KeyboardKind.mac,
+  'windows' || 'linux' => KeyboardKind.xkb,
+  _ => KeyboardKind.unknown,
+};
+
 /// 外观单独通知，避免每秒的数据刷新重建整个 MaterialApp。
 class Appearance extends ChangeNotifier {
   ThemeMode _mode = ThemeMode.system;
@@ -236,12 +261,19 @@ class AppState extends ChangeNotifier {
   /// 本机系统：`macos`、`windows` 等。
   String get platform => _daemon?.local.platform ?? '';
 
-  /// 本机是不是 Mac。旧版后台不报系统，那时服务端一定是 Mac、客户端一定是 Windows。
-  bool get localIsMac => platform.isEmpty ? isServer : platform == 'macos';
+  /// 本机键盘类型。未知系统不按连接角色或非 Mac 默认值猜测。
+  KeyboardKind get localKeyboard => keyboardKindOf(platform);
 
-  /// 本机和对方的图标。对方是什么系统不知道，按“和本机不一样”画：Mac 与 Windows 互相控制最常见。
-  IconData get localIcon => localIsMac ? Icons.desktop_mac_outlined : Icons.desktop_windows_outlined;
-  IconData get peerIcon => localIsMac ? Icons.desktop_windows_outlined : Icons.desktop_mac_outlined;
+  /// 本机是不是 Mac。
+  bool get localIsMac => localKeyboard == KeyboardKind.mac;
+
+  /// 本机和当前对方的图标。对方还没报系统时用中性图标，不按本机反推。
+  IconData get localIcon => platformIconOf(platform);
+  IconData get peerIcon {
+    final current = peer;
+    return platformIconOf(current == null ? '' : peerOf(current.fingerprint)?.platform ?? '');
+  }
+
   String get localName => _daemon?.local.name ?? '';
   String get localFingerprint => _daemon?.local.short ?? '';
   String get dataDir => _daemon?.local.dataDir ?? '';
@@ -337,14 +369,21 @@ class AppState extends ChangeNotifier {
   /// 一台已配对的设备；不在列表里时为 null。
   PeerInfo? peerOf(String fingerprint) => peers.where((p) => p.fingerprint == fingerprint).firstOrNull;
 
-  /// 对方是不是 Mac。后台还不知道时按“和本机不一样”推断：Mac 与 Windows 互相控制最常见。
-  bool peerIsMac(PeerInfo p) => p.platform.isEmpty ? !localIsMac : p.platform == 'macos';
+  KeyboardKind peerKeyboard(PeerInfo p) => keyboardKindOf(p.platform);
+
+  /// 只有后台明确报告 macOS 才按 Mac 处理。
+  bool peerIsMac(PeerInfo p) => peerKeyboard(p) == KeyboardKind.mac;
 
   /// 对方的图标。
-  IconData peerIconOf(PeerInfo p) => peerIsMac(p) ? Icons.desktop_mac_outlined : Icons.desktop_windows_outlined;
+  IconData peerIconOf(PeerInfo p) => platformIconOf(p.platform);
 
-  /// 两台不是同一种键盘（一台 Mac、一台不是）。
-  bool keyboardsDiffer(PeerInfo p) => localIsMac != peerIsMac(p);
+  /// 两台是不是不同键盘；任一端系统未知时为 null，表示不能推断。
+  bool? keyboardsDiffer(PeerInfo p) {
+    final local = localKeyboard;
+    final peer = peerKeyboard(p);
+    if (local == KeyboardKind.unknown || peer == KeyboardKind.unknown) return null;
+    return local != peer;
+  }
 
   /// 刚配对上的设备，用来播放卡片进场动画。
   bool isFresh(String fingerprint) {

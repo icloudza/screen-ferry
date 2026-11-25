@@ -121,6 +121,10 @@ mod mac {
                 .unwrap_or_else(|| "Mac".into())
         }
 
+        fn platform(&self) -> &'static str {
+            "macos"
+        }
+
         fn check_permissions(&self, _role: Role) -> Result<()> {
             // 控制别的电脑（读取键鼠）和被控制（发出键鼠）都要辅助功能权限。
             // 第一次发现缺权限时向系统申请一次：系统弹出提示，并把本程序加进授权列表。
@@ -304,6 +308,10 @@ mod win {
                 .unwrap_or_else(|| "Windows".into())
         }
 
+        fn platform(&self) -> &'static str {
+            "windows"
+        }
+
         fn check_permissions(&self, _role: Role) -> Result<()> {
             WinPermissions.check_input()
         }
@@ -432,6 +440,178 @@ mod win {
         fn open_folder(&self, path: &Path) {
             ferry_platform_windows::allow_foreground();
             if let Err(e) = Command::new("explorer").arg(path).spawn() {
+                warn!("打开文件夹失败：{e}");
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) use ferry_platform_linux::LinuxEventLoop as NativeEventLoop;
+#[cfg(target_os = "linux")]
+pub(crate) use linux::NativeHost;
+
+#[cfg(target_os = "linux")]
+mod linux {
+    use std::path::{Path, PathBuf};
+    use std::process::{Command, Stdio};
+
+    use ferry_engine::resident::Host;
+    use ferry_platform::{Autostart, Error, Permissions, Result};
+    use ferry_platform_linux::{
+        LinuxAutostart, LinuxCapture, LinuxClipboard, LinuxDisplays, LinuxInject, LinuxOverlay,
+        LinuxPermissions,
+    };
+    use ferry_types::Role;
+    use tracing::warn;
+
+    use super::{arch, autostart_command, exe_dir, settings_app};
+
+    fn executable_file(path: &Path) -> bool {
+        use std::os::unix::fs::PermissionsExt;
+
+        std::fs::metadata(path)
+            .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
+    }
+
+    pub(crate) struct NativeHost {
+        autostart: Option<LinuxAutostart>,
+    }
+
+    impl NativeHost {
+        pub(crate) fn new() -> Self {
+            let autostart = autostart_command().and_then(|args| LinuxAutostart::new(args).ok());
+            Self { autostart }
+        }
+    }
+
+    impl Host for NativeHost {
+        type Capture = LinuxCapture;
+        type Inject = LinuxInject;
+        type Displays = LinuxDisplays;
+        type Clipboard = LinuxClipboard;
+        type Overlay = LinuxOverlay;
+        type Updater = ferry_platform_linux::LinuxUpdater;
+
+        fn device_name(&self) -> String {
+            std::fs::read_to_string("/etc/hostname")
+                .ok()
+                .map(|name| name.trim().to_owned())
+                .filter(|name| !name.is_empty())
+                .unwrap_or_else(|| "Linux".into())
+        }
+
+        fn platform(&self) -> &'static str {
+            "linux"
+        }
+
+        fn edge_drop(&self) -> bool {
+            false
+        }
+
+        fn check_permissions(&self, _role: Role) -> Result<()> {
+            LinuxPermissions.check_input()
+        }
+
+        fn capture(&self) -> Result<LinuxCapture> {
+            LinuxPermissions.check_input()?;
+            Ok(LinuxCapture::new())
+        }
+
+        fn inject(&self) -> Result<LinuxInject> {
+            LinuxInject::new()
+        }
+
+        fn displays(&self) -> LinuxDisplays {
+            LinuxDisplays::new()
+        }
+
+        fn clipboard(&self) -> LinuxClipboard {
+            LinuxClipboard::new()
+        }
+
+        fn overlay(&self) -> LinuxOverlay {
+            LinuxOverlay::new()
+        }
+
+        fn updater(&self) -> ferry_platform_linux::LinuxUpdater {
+            ferry_platform_linux::LinuxUpdater::new()
+        }
+
+        fn autostart(&self) -> bool {
+            self.autostart
+                .as_ref()
+                .is_some_and(|a| a.is_enabled().unwrap_or(false))
+        }
+
+        fn set_autostart(&self, on: bool) -> Result<()> {
+            self.autostart
+                .as_ref()
+                .ok_or(Error::Unsupported("找不到程序的位置"))?
+                .set_enabled(on)
+        }
+
+        fn open_settings(&self) {
+            let candidates: Vec<PathBuf> = exe_dir()
+                .map(|dir| {
+                    let flutter = dir.join("../../app/build/linux").join(arch());
+                    vec![
+                        dir.join("screenferry-settings"),
+                        dir.join("settings/screenferry-settings"),
+                        flutter.join("release/bundle/screenferry-settings"),
+                        flutter.join("debug/bundle/screenferry-settings"),
+                    ]
+                })
+                .unwrap_or_default();
+            let Some(app) = settings_app(&candidates).filter(|app| executable_file(app)) else {
+                warn!("找不到可执行的设置界面，可以用环境变量 SCREENFERRY_SETTINGS_APP 指定");
+                return;
+            };
+            if let Err(error) = Command::new(&app)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+            {
+                warn!("打开设置界面失败：{error}");
+            }
+        }
+
+        fn open_permission_settings(&self) {}
+
+        fn system_language(&self) -> ferry_types::Lang {
+            super::system_language()
+        }
+
+        fn system(&self) -> String {
+            let os = std::fs::read_to_string("/etc/os-release")
+                .ok()
+                .and_then(|text| {
+                    text.lines()
+                        .find_map(|line| line.strip_prefix("PRETTY_NAME="))
+                        .map(|name| name.trim_matches(['"', '\'']).to_owned())
+                })
+                .unwrap_or_else(|| "Linux".into());
+            format!("{os} · {}", arch())
+        }
+
+        fn utc_offset(&self) -> i32 {
+            crate::logging::utc_offset()
+        }
+
+        fn set_verbose(&self, on: bool) {
+            crate::logging::set_verbose(on);
+        }
+
+        fn reveal(&self, path: &Path) {
+            let dir = path.parent().unwrap_or(Path::new("."));
+            if let Err(e) = Command::new("xdg-open").arg(dir).spawn() {
+                warn!("在文件管理器中显示失败：{e}");
+            }
+        }
+
+        fn open_folder(&self, path: &Path) {
+            if let Err(e) = Command::new("xdg-open").arg(path).spawn() {
                 warn!("打开文件夹失败：{e}");
             }
         }

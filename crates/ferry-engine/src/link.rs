@@ -13,12 +13,13 @@ use crate::error::{Error, Result};
 /// 默认端口。
 pub const DEFAULT_PORT: u16 = 24810;
 
-/// 本机声明的可选能力。`command_key`：本机的快捷键以 Command 键为主。
-pub(crate) fn capabilities(clipboard: bool, command_key: bool) -> Capabilities {
+/// 本机声明的可选能力。`command_key`：本机的快捷键以 Command 键为主；
+/// `edge_drop`：本机支持屏幕边缘投递。
+pub(crate) fn capabilities(clipboard: bool, command_key: bool, edge_drop: bool) -> Capabilities {
     let mut caps = Capabilities::FILES
-        | Capabilities::EDGE_DROP
         | Capabilities::REMOTE_SETTINGS
         | Capabilities::APP_INFO
+        | Capabilities::PLATFORM_INFO
         | Capabilities::SECURE_INPUT
         | Capabilities::INPUT_BLOCKED;
     if clipboard {
@@ -26,6 +27,9 @@ pub(crate) fn capabilities(clipboard: bool, command_key: bool) -> Capabilities {
     }
     if command_key {
         caps |= Capabilities::COMMAND_KEY;
+    }
+    if edge_drop {
+        caps |= Capabilities::EDGE_DROP;
     }
     caps
 }
@@ -37,9 +41,10 @@ pub(crate) fn app_info() -> Message {
     }
 }
 
-/// 对方是什么系统：快捷键以 Command 为主的是 macOS，其余目前都是 Windows。
-pub(crate) fn platform_of(command_key: bool) -> String {
-    if command_key { "macos" } else { "windows" }.to_owned()
+pub(crate) fn platform_info(platform: &str) -> Message {
+    Message::PlatformInfo {
+        platform: platform.to_owned(),
+    }
 }
 
 pub(crate) const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);

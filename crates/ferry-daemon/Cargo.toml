@@ -38,5 +38,10 @@ ferry-platform-macos.workspace = true
 png.workspace = true
 tray-icon.workspace = true
 
+[target.'cfg(target_os = "linux")'.dependencies]
+ferry-platform-linux.workspace = true
+png.workspace = true
+tray-icon = { workspace = true, features = ["ksni"] }
+
 [lints]
 workspace = true

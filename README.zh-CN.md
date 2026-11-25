@@ -8,7 +8,7 @@
 
 [English](README.md) | 简体中文
 
-一套键盘鼠标控制多台电脑。ScreenFerry 在多台电脑之间共享键鼠（Mac、Windows 任意搭配），同步剪贴板、互传文件，连接全程 TLS 1.3 加密。
+一套键盘鼠标控制多台电脑。ScreenFerry 在多台电脑之间共享键鼠（macOS、Windows、Arch Linux / niri 任意搭配），同步剪贴板、互传文件，连接全程 TLS 1.3 加密。
 
 ## 特性
 
@@ -20,7 +20,7 @@
 - **安全**：首次连接核对 6 位配对码，之后只认对方的证书指纹。
 - **连得上**：局域网自动发现；网络不支持时按地址连接，或从控制端邀请。
 - **轻量**：Rust 编写的后台常驻托盘；设置界面按需启动，关闭即退出。
-- **自动更新**：每天检查一次，在后台下载好，你点“重启并更新”时安装；装之前先校验签名。
+- **自动更新（macOS 和 Windows）**：每天检查一次，在后台下载好，你点“重启并更新”时安装；装之前先校验签名。Linux 版通过包管理器更新，或重新从源码构建。
 - **中英文**：界面、托盘菜单和安装程序有简体中文和英文，默认跟随系统，可以在“设置 → 外观”里切换。
 
 ## 工作方式
@@ -65,8 +65,13 @@ sequenceDiagram
 |---|---|
 | macOS | 在 [Releases](https://github.com/icloudza/screen-ferry/releases/latest) 下载 `ScreenFerry-<版本>-macos-universal.dmg`，打开后把 ScreenFerry 拖进“应用程序”。首次运行时在「系统设置 → 隐私与安全性 → 辅助功能」中允许 ScreenFerry。 |
 | Windows | 在 [Releases](https://github.com/icloudza/screen-ferry/releases/latest) 下载 `ScreenFerry-<版本>-windows-x64-setup.exe` 并运行。 |
+| Arch Linux / niri | 暂需自行构建，目前没有 pacman/AUR 包或图形安装程序。先安装下面的依赖，再在仓库根目录执行 `cargo xtask bundle`。运行 `target/bundle/linux/ScreenFerry/screenferry`，或把整个目录复制到 `~/.local/opt/ScreenFerry/` 便携使用；托盘使用 KSNI，桌面需要有 Waybar 等 StatusNotifierItem 托盘宿主。Linux 直接使用 Wayland 协议，不需要 root 或 evdev 设备权限。 |
 
-ScreenFerry 每天检查一次更新，有新版本时在后台下载好，你方便时点“重启并更新”即可；可以在“设置 → 关于”里关掉自动检查。安装前会用内置的签名公钥校验更新。
+Linux 目前支持键鼠共享、剪贴板同步和命令行发送文件，暂不支持边缘拖放与应用内自动更新。文件请用 `screenferry send` 发送，更新请通过包管理器或重新构建。niri 会话需要提供 wlr 虚拟指针（`zwlr_virtual_pointer_manager_v1`）、虚拟键盘（`zwp_virtual_keyboard_manager_v1`）、layer-shell、相对指针、指针锁定和键盘快捷键抑制（`zwp_keyboard_shortcuts_inhibit_manager_v1`）协议。抓取期间 niri 的普通全局快捷键会转发给远端；建议配置 `Mod+Escape allow-inhibiting=false { toggle-keyboard-shortcuts-inhibit; }` 作为立即交还本机控制的逃生键。
+
+2026-11-25 的键鼠实机验证环境为 Arch Linux x86_64（内核 `7.3.4-arch1-1`，niri `v26.04-322-g2fbc6f3b-modified`）与 macOS 15.8.3 MacBook Pro。双方各使用单个 1920×1080、100% 缩放的逻辑显示器，双向边缘切换和多次往返已通过。工具链版本及尚未覆盖的范围见[实机验证记录](docs/handoff-linux-macos.md#6-实机验证记录2026-11-25)。
+
+macOS 和 Windows 上，ScreenFerry 每天检查一次更新，有新版本时在后台下载好，你方便时点“重启并更新”即可；可以在“设置 → 关于”里关掉自动检查。安装前会用内置的签名公钥校验更新。Linux 不提供应用内更新。
 
 Windows 安装包：
 
@@ -101,21 +106,27 @@ Windows 安装包：
 
 ### 数据位置
 
-| | macOS | Windows |
-|---|---|---|
-| 配置、配对记录 | `~/Library/Application Support/ScreenFerry/` | `%APPDATA%\ScreenFerry\` |
-| 日志、运行时文件 | `~/Library/Caches/ScreenFerry/` | `%LOCALAPPDATA%\ScreenFerry\` |
+| | macOS | Windows | Linux |
+|---|---|---|---|
+| 配置、配对记录 | `~/Library/Application Support/ScreenFerry/` | `%APPDATA%\ScreenFerry\` | `${XDG_DATA_HOME:-~/.local/share}/screenferry/` |
+| 日志、运行时文件 | `~/Library/Caches/ScreenFerry/` | `%LOCALAPPDATA%\ScreenFerry\` | `${XDG_CACHE_HOME:-~/.cache}/screenferry/` |
 
 ## 从源码构建
 
 需要 Rust（版本由 `rust-toolchain.toml` 固定，rustup 自动安装）和 Flutter 3.47。
-macOS 另需 Xcode；Windows 另需 Visual Studio 2022（使用 C++ 的桌面开发）和 [Inno Setup](https://jrsoftware.org/isdl.php) 7.1 或更高版本。
+Arch Linux 需要安装编译工具、GTK 3 开发文件，以及剪贴板和打开文件用的辅助程序：
+
+```bash
+sudo pacman -S --needed base-devel clang cmake ninja pkgconf gtk3 wl-clipboard xdg-utils
+```
+
+Linux 输入支持面向 niri Wayland 合成器，托盘使用 KSNI，不再需要 AppIndicator。macOS 另需 Xcode；Windows 另需 Visual Studio 2022（使用 C++ 的桌面开发）和 [Inno Setup](https://jrsoftware.org/isdl.php) 7.1 或更高版本。
 
 ```bash
 cargo xtask bundle
 ```
 
-在哪个系统上运行就打哪个系统的包，产物在 `target/bundle/`：macOS 是 `ScreenFerry.app` 和它的更新包 `ScreenFerry-<版本>-macos-<架构>.zip`（加 `--dmg` 另做安装盘），Windows 是 `ScreenFerry-<版本>-windows-x64-setup.exe`。发布用 `cargo xtask release <版本>`，见 ADR 0014。
+在哪个系统上运行就打哪个系统的包，产物在 `target/bundle/`：macOS 是 `ScreenFerry.app` 和它的更新包 `ScreenFerry-<版本>-macos-<架构>.zip`（加 `--dmg` 另做安装盘），Windows 是 `ScreenFerry-<版本>-windows-x64-setup.exe`，Linux 是可直接运行的 `linux/ScreenFerry/` 目录。发布用 `cargo xtask release <版本>`，见 ADR 0014。
 macOS 上钥匙串里有 Developer ID 证书时自动签名（也可以用 `SCREENFERRY_SIGN_IDENTITY` 指定），否则用临时签名，每次重新打包都要重新授予辅助功能权限。
 
 ## 开发
@@ -131,7 +142,7 @@ flowchart TB
   end
   subgraph L2["L2 适配"]
     direction LR
-    pm["platform-macos"] ~~~ pw["platform-windows"] ~~~ net["net"] ~~~ store["store"] ~~~ ipc["ipc"]
+    pm["platform-macos"] ~~~ pw["platform-windows"] ~~~ pl["platform-linux"] ~~~ net["net"] ~~~ store["store"] ~~~ ipc["ipc"]
   end
   subgraph L1["L1 纯逻辑"]
     direction LR
@@ -157,6 +168,7 @@ cargo xtask lint
 | [AGENTS.md](AGENTS.md) | 工程规范：目录、分层、命名、测试 |
 | [docs/architecture.md](docs/architecture.md) | 架构总览与 crate 依赖 |
 | [docs/protocol.md](docs/protocol.md) | 线协议 |
+| [docs/handoff-linux-macos.md](docs/handoff-linux-macos.md) | Linux / niri 与 macOS 编译、安装与互通验收交接 |
 | [docs/ipc.md](docs/ipc.md) | 设置界面与后台之间的本机通信 |
 | [docs/adr/](docs/adr/) | 架构决策记录 |
 

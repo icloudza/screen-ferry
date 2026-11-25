@@ -97,6 +97,12 @@ pub struct Setup {
     /// 两端的快捷键是否以 Command 为主；默认服务端是 Mac、客户端是 PC。
     pub mac_command_key: bool,
     pub pc_command_key: bool,
+    /// 两端报告的系统；默认都是测试平台。
+    pub mac_platform: &'static str,
+    pub pc_platform: &'static str,
+    /// 两端是否宣告支持边缘投递；默认都支持，保持原有场景测试行为。
+    pub mac_edge_drop: bool,
+    pub pc_edge_drop: bool,
     /// 两端的剪贴板单项上限；默认 32 MB。
     pub mac_clip_limit: ClipLimit,
     pub pc_clip_limit: ClipLimit,
@@ -123,6 +129,10 @@ impl Default for Setup {
             pc_files: None,
             mac_command_key: true,
             pc_command_key: false,
+            mac_platform: "test",
+            pc_platform: "test",
+            mac_edge_drop: true,
+            pc_edge_drop: true,
             mac_clip_limit: ClipLimit::default(),
             pc_clip_limit: ClipLimit::default(),
         }
@@ -220,9 +230,10 @@ impl Rig {
                 }),
                 name: "mac".into(),
                 clipboard: true,
-
                 clipboard_limit: setup.mac_clip_limit.clone(),
+                platform: setup.mac_platform,
                 command_key: setup.mac_command_key,
+                edge_drop: setup.mac_edge_drop,
                 store: setup.mac.store.clone(),
                 announce: setup.discover,
                 events: setup.mac_events.clone(),
@@ -284,9 +295,10 @@ impl Rig {
             },
             name: "pc".into(),
             clipboard: true,
-
             clipboard_limit: setup.pc_clip_limit.clone(),
+            platform: setup.pc_platform,
             command_key: setup.pc_command_key,
+            edge_drop: setup.pc_edge_drop,
             store: setup.pc.store.clone(),
             events: setup.pc_events.clone(),
             files,
@@ -458,9 +470,10 @@ impl Rig {
             server: ServerAddr::Fixed(self.addr),
             name: name.into(),
             clipboard: true,
-
             clipboard_limit: Default::default(),
+            platform: "test",
             command_key: false,
+            edge_drop: true,
             store: device.store.clone(),
             events,
             files,
@@ -521,7 +534,9 @@ impl Rig {
             name: name.into(),
             clipboard: true,
             clipboard_limit: Default::default(),
+            platform: "test",
             command_key: false,
+            edge_drop: true,
             store: device.store.clone(),
             events,
             files: Files::new(&device.store, Events::none()),

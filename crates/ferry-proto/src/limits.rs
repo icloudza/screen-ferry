@@ -6,6 +6,9 @@ pub const MAX_NAME_LEN: usize = 128;
 /// 程序版本号（`AppInfo`）的最大字节数。
 pub const MAX_VERSION_LEN: usize = 64;
 
+/// 对端系统标识（`PlatformInfo`）的最大字节数。
+pub const MAX_PLATFORM_LEN: usize = 16;
+
 /// 一台设备最多声明的显示器数量。
 pub const MAX_DISPLAYS: usize = 32;
 

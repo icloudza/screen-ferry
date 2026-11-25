@@ -40,7 +40,7 @@ use crate::files::{FileLink, Files, Opener};
 use crate::invite::{self, Invitation};
 use crate::link::{
     CONNECT_TIMEOUT, DEFAULT_PORT, DISPLAY_CHECK, HANDSHAKE_TIMEOUT, capabilities, frame_of,
-    platform_of, primary_scale, send,
+    primary_scale, send,
 };
 use crate::pairing::{self, ConfirmPairing, Outcome};
 
@@ -84,8 +84,12 @@ pub struct ClientConfig {
     pub clipboard: bool,
     /// 剪贴板单项的大小上限，会话中途也能改。
     pub clipboard_limit: ClipLimit,
+    /// 本机系统，例如 `macos`、`windows`、`linux`。
+    pub platform: &'static str,
     /// 本机的快捷键以 Command 键为主（macOS）。告诉服务端，由它决定要不要互换 Command 与 Ctrl。
     pub command_key: bool,
+    /// 本机是否支持屏幕边缘投递。
+    pub edge_drop: bool,
     /// 数据目录：本机身份和已信任的设备。
     pub store: Store,
     /// 对外报告的事件。
@@ -578,7 +582,11 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
                 None
             });
         self.secure_input = challenge.is_some();
-        let mut caps = capabilities(config.clipboard && device.clipboard, config.command_key);
+        let mut caps = capabilities(
+            config.clipboard && device.clipboard,
+            config.command_key,
+            config.edge_drop,
+        );
         if !self.secure_input {
             caps.remove(Capabilities::SECURE_INPUT);
         }
@@ -618,21 +626,20 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
         if welcome.capabilities.contains(Capabilities::APP_INFO) {
             send(&mut framed, &crate::link::app_info()).await?;
         }
+        if welcome.capabilities.contains(Capabilities::PLATFORM_INFO) {
+            send(&mut framed, &crate::link::platform_info(config.platform)).await?;
+        }
         info!(server = %mark::device(&welcome.name), fingerprint = %server, "已连接，等待光标进入");
         self.in_session = true;
         self.server = Some(server);
         *lock(&self.current) = Some(server);
         // 刚连上时光标在服务端屏幕上。
         self.hide_cursor(true);
-        // 本机是 Mac 时看得出对方是不是 Mac：交集里有 COMMAND_KEY 说明两边都是。
-        let platform = config
-            .command_key
-            .then(|| platform_of(welcome.capabilities.contains(Capabilities::COMMAND_KEY)));
         self.events.emit(Event::Connected {
             name: welcome.name.clone(),
             fingerprint: server,
             addr,
-            platform,
+            platform: None,
         });
         // 上次会话里没来得及处理的命令已经过时。
         if let Some(commands) = &mut self.commands {
@@ -933,6 +940,12 @@ impl<I: InputInject, K: Clipboard, P: ConfirmPairing> Client<I, K, P> {
                     self.events.emit(Event::PeerVersion {
                         peer: server,
                         version,
+                    });
+                }
+                Some(Message::PlatformInfo { platform }) => {
+                    self.events.emit(Event::PeerPlatform {
+                        peer: server,
+                        platform,
                     });
                 }
                 Some(Message::Displays(_)) => {}

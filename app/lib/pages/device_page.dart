@@ -30,9 +30,13 @@ class DevicePage extends StatelessWidget {
     final state = AppScope.of(context);
     final d = state.deviceSettings(peer.fingerprint);
     final server = state.isServer;
-    final localMac = state.localIsMac;
-    final peerMac = state.peerIsMac(peer);
-    final differ = state.keyboardsDiffer(peer);
+    final localKeyboard = state.localKeyboard;
+    final peerKeyboard = state.peerKeyboard(peer);
+    final localMac = localKeyboard == KeyboardKind.mac;
+    final peerMac = peerKeyboard == KeyboardKind.mac;
+    final keyboardDiffer = state.keyboardsDiffer(peer);
+    final differ = keyboardDiffer ?? false;
+    final keyboardUnknown = keyboardDiffer == null;
     final name = peer.displayName;
     // 没连上后台时控件不可用（返回 null）。
     ValueChanged<T>? change<T>(DeviceSettings Function(T) next) =>
@@ -88,12 +92,13 @@ class DevicePage extends StatelessWidget {
                     onChanged: change((ScrollSpeed v) => d.copyWith(scrollSpeed: v)),
                   ),
                 ),
-                if (server && state.naturalScrolling && !peerMac) _Tip(l.deviceNaturalTip),
+                if (server && state.naturalScrolling && peerKeyboard == KeyboardKind.xkb) _Tip(l.deviceNaturalTip),
               ],
             ),
           ],
         ),
         SectionTitle(l.deviceKeys, note: later),
+        if (keyboardUnknown) _Tip(l.deviceKeyboardUnknown),
         SfGroup(
           children: [
             Column(
@@ -102,11 +107,11 @@ class DevicePage extends StatelessWidget {
                 SfRow(
                   icon: Icons.keyboard_alt_outlined,
                   title: l.deviceModifiers,
-                  subtitle: _presetNote(l, d.modifiers, differ: differ, localMac: localMac, name: name),
+                  subtitle: _presetNote(l, d.modifiers, differ: differ, localKeyboard: localKeyboard, name: name),
                   trailing: SfSegmented<ModifierPreset>(
                     label: l.deviceModifierPreset,
                     segments: [
-                      (ModifierPreset.habit, localMac ? l.deviceMacHabit : l.deviceWindowsHabit),
+                      (ModifierPreset.habit, _habitLabel(l, state.platform)),
                       (ModifierPreset.plain, l.deviceAsIs),
                       (ModifierPreset.custom, l.deviceCustom),
                     ],
@@ -171,8 +176,17 @@ class DevicePage extends StatelessWidget {
             if (differ)
               SfRow(
                 icon: localMac ? Icons.keyboard_command_key_rounded : Icons.keyboard_control_key_rounded,
-                title: localMac ? l.deviceTextMac : l.deviceTextWindows,
-                subtitle: localMac ? l.deviceTextMacHint : l.deviceTextWindowsHint,
+                title: switch (state.platform) {
+                  'macos' => l.deviceTextMac,
+                  'linux' => l.deviceTextXkb,
+                  'windows' => l.deviceTextWindows,
+                  _ => l.deviceTextWindows,
+                },
+                subtitle: switch (localKeyboard) {
+                  KeyboardKind.mac => l.deviceTextMacHint,
+                  KeyboardKind.xkb => l.deviceTextXkbHint,
+                  KeyboardKind.unknown => l.deviceTextWindowsHint,
+                },
                 trailing: SfSwitch(
                   value: d.textShortcuts,
                   label: l.deviceTextShortcuts,
@@ -243,20 +257,31 @@ class DevicePage extends StatelessWidget {
   }
 }
 
+String _habitLabel(AppLocalizations l, String platform) => switch (platform) {
+  'macos' => l.deviceMacHabit,
+  'linux' => l.deviceXkbHabit,
+  'windows' => l.deviceWindowsHabit,
+  _ => l.deviceAsIs,
+};
+
 /// 修饰键方案下面的一句说明。
 String _presetNote(
   AppLocalizations l,
   ModifierPreset preset, {
   required bool differ,
-  required bool localMac,
+  required KeyboardKind localKeyboard,
   required String name,
-}) => switch (preset) {
-  ModifierPreset.habit when differ => localMac ? l.devicePresetMacDiffer(name) : l.devicePresetWinDiffer(name),
-  ModifierPreset.habit => l.devicePresetSame,
-  ModifierPreset.plain when differ => localMac ? l.devicePresetPlainMac : l.devicePresetPlainWin,
-  ModifierPreset.plain => l.devicePresetPlain,
-  ModifierPreset.custom => l.devicePresetCustom,
-};
+}) {
+  if (localKeyboard == KeyboardKind.unknown) return l.deviceKeyboardUnknown;
+  final localMac = localKeyboard == KeyboardKind.mac;
+  return switch (preset) {
+    ModifierPreset.habit when differ => localMac ? l.devicePresetMacDiffer(name) : l.devicePresetWinDiffer(name),
+    ModifierPreset.habit => l.devicePresetSame,
+    ModifierPreset.plain when differ => localMac ? l.devicePresetPlainMac : l.devicePresetPlainWin,
+    ModifierPreset.plain => l.devicePresetPlain,
+    ModifierPreset.custom => l.devicePresetCustom,
+  };
+}
 
 // ── 头部与横幅 ───────────────────────────────
 
@@ -297,7 +322,7 @@ class _Header extends StatelessWidget {
                 const SizedBox(height: 4),
                 Text.rich(
                   TextSpan(
-                    text: context.l10n.deviceSystemFingerprint(state.peerIsMac(peer) ? 'macOS' : 'Windows'),
+                    text: context.l10n.deviceSystemFingerprint(platformLabelOf(peer.platform)),
                     children: [
                       TextSpan(
                         text: peer.short,

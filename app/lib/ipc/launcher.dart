@@ -2,11 +2,11 @@
 
 import 'dart:io';
 
-/// 后台的位置：macOS 上是外层的 ScreenFerry.app，Windows 上是 screenferry.exe。
+/// 后台的位置：macOS 上是外层 ScreenFerry.app，Linux 和 Windows 上在同目录。
 /// 不在安装包里（开发时直接运行）时为 null。
 String? daemonLocation([String? executable]) {
   final exe = executable ?? Platform.resolvedExecutable;
-  if (Platform.isMacOS || executable != null && exe.startsWith('/')) {
+  if (exe.contains('.app/')) {
     // …/ScreenFerry.app/Contents/Helpers/ScreenFerry.app/Contents/MacOS/ScreenFerry
     final parts = exe.split('/');
     final helpers = parts.lastIndexOf('Helpers');
@@ -14,6 +14,10 @@ String? daemonLocation([String? executable]) {
     final app = parts.sublist(0, helpers - 1).join('/');
     if (!app.endsWith('.app')) return null;
     return File('$app/Contents/MacOS/screenferry').existsSync() ? app : null;
+  }
+  if (Platform.isLinux) {
+    final daemon = File('${File(exe).parent.path}/screenferry');
+    return daemon.existsSync() ? daemon.path : null;
   }
   if (Platform.isWindows) {
     // …\ScreenFerry\settings\screenferry-settings.exe，后台是 …\ScreenFerry\screenferry.exe

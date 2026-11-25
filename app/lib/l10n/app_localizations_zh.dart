@@ -1237,6 +1237,12 @@ class AppLocalizationsZh extends AppLocalizations {
   String get deviceMacHabit => 'Mac 习惯';
 
   @override
+  String get deviceXkbHabit => 'PC / XKB 习惯';
+
+  @override
+  String get deviceKeyboardUnknown => '还不知道两台设备的键盘类型，修饰键先按原样发送。连上并交换系统信息后会自动调整。';
+
+  @override
   String get deviceWindowsHabit => 'Windows 习惯';
 
   @override
@@ -1255,10 +1261,16 @@ class AppLocalizationsZh extends AppLocalizations {
   String get deviceTextMac => '文本编辑快捷键按 Mac 习惯';
 
   @override
+  String get deviceTextXkb => '文本编辑快捷键按 PC / XKB 习惯';
+
+  @override
   String get deviceTextWindows => '文本编辑快捷键按 Windows 习惯';
 
   @override
   String get deviceTextMacHint => '⌘← ⌘→ 到行首行尾，⌥← ⌥→ 按词移动，⌘⌫ 删到行首';
+
+  @override
+  String get deviceTextXkbHint => 'Home End 到行首行尾，Ctrl+← Ctrl+→ 按词移动';
 
   @override
   String get deviceTextWindowsHint => 'Home End 到行首行尾，Ctrl+← Ctrl+→ 按词移动';

@@ -2,7 +2,7 @@
 //! 新版本下载好后多一项“重启并更新”。
 //! 图标只有两种：已连接（光球正穿过屏幕边框）和未连接（光球停在屏幕里、变淡）；
 //! 暂停、等待连接、寻找服务端、出了问题都算未连接，具体情况看菜单第一行。
-//! macOS 按菜单栏的习惯，点图标弹出菜单；Windows 按任务栏的习惯，左键直接打开设置界面，右键弹出菜单。
+//! macOS 按菜单栏的习惯，点图标弹出菜单；Windows 和 Linux 左键直接打开设置界面，右键弹出菜单。
 //!
 //! 托盘对象只能在主线程上创建和修改，所以放在主线程的线程局部变量里；
 //! 状态变化时由引擎所在的线程经 [`Dispatcher`] 把更新交给主线程。
@@ -62,6 +62,27 @@ mod art {
     }
 }
 
+/// Linux 桌面环境通过 KSNI 显示彩色托盘图标。
+#[cfg(target_os = "linux")]
+mod art {
+    use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
+
+    pub(super) const CONNECTED: &[u8] =
+        include_bytes!("../../../assets/icons/tray-win-connected.png");
+    pub(super) const DISCONNECTED: &[u8] =
+        include_bytes!("../../../assets/icons/tray-win-disconnected.png");
+
+    pub(super) fn builder(icon: Icon) -> TrayIconBuilder {
+        TrayIconBuilder::new()
+            .with_icon(icon)
+            .with_menu_on_left_click(false)
+    }
+
+    pub(super) fn set(tray: &TrayIcon, icon: Icon) -> tray_icon::Result<()> {
+        tray.set_icon(Some(icon))
+    }
+}
+
 struct Tray {
     icon: TrayIcon,
     menu: Menu,
@@ -107,7 +128,7 @@ pub(crate) fn install(handle: Handle) -> Result<(), Box<dyn std::error::Error>> 
         .with_menu(Box::new(menu.clone()))
         .build()?;
 
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
     {
         use tray_icon::{MouseButton, MouseButtonState, TrayIconEvent};
 

@@ -27,7 +27,7 @@ pub use device::{
 };
 pub use display::{Display, DisplayId};
 pub use geometry::{Point, Rect, Side};
-pub use input::InputEvent;
+pub use input::{InputEvent, RelativeMotionAccumulator};
 pub use input_proof::InputProof;
 pub use key::{KeyAction, KeyCode, LockKeys};
 pub use pointer::{MouseButton, WHEEL_NOTCH};

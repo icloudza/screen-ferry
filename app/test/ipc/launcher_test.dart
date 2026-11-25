@@ -23,6 +23,12 @@ void main() {
     expect(daemonLocation(settingsExe(app)), isNull);
   });
 
+  test('Linux 安装目录里后台与设置界面相邻', () {
+    final dir = '${root.path}/ScreenFerry';
+    File('$dir/screenferry').createSync(recursive: true);
+    expect(daemonLocation('$dir/screenferry-settings'), '$dir/screenferry');
+  }, skip: !Platform.isLinux);
+
   test('开发时直接运行的界面不在安装包里', () {
     expect(
       daemonLocation('${root.path}/build/macos/Build/Products/Release/ScreenFerry.app/Contents/MacOS/ScreenFerry'),

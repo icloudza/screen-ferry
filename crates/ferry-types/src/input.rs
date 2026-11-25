@@ -34,3 +34,25 @@ pub enum InputEvent {
         position: Point,
     },
 }
+
+/// 保留 Wayland 亚像素位移，返回可发送的整数增量。
+#[derive(Clone, Copy, Debug, Default)]
+pub struct RelativeMotionAccumulator {
+    remainder: [f64; 2],
+}
+
+impl RelativeMotionAccumulator {
+    pub fn update(&mut self, dx: f64, dy: f64) -> (i32, i32) {
+        let mut delta = [0; 2];
+        for (index, value) in [dx, dy].into_iter().enumerate() {
+            let accumulated = self.remainder[index] + value;
+            if accumulated.is_finite() {
+                delta[index] = accumulated.trunc() as i32;
+                self.remainder[index] = accumulated - f64::from(delta[index]);
+            } else {
+                self.remainder[index] = 0.0;
+            }
+        }
+        (delta[0], delta[1])
+    }
+}

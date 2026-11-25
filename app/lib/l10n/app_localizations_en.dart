@@ -1295,6 +1295,13 @@ class AppLocalizationsEn extends AppLocalizations {
   String get deviceMacHabit => 'Mac Style';
 
   @override
+  String get deviceXkbHabit => 'PC / XKB Style';
+
+  @override
+  String get deviceKeyboardUnknown =>
+      'The keyboard types are not known yet, so modifier keys are sent as is. This adjusts automatically after the devices exchange system information.';
+
+  @override
   String get deviceWindowsHabit => 'Windows Style';
 
   @override
@@ -1313,10 +1320,16 @@ class AppLocalizationsEn extends AppLocalizations {
   String get deviceTextMac => 'Mac-Style Text Editing Shortcuts';
 
   @override
+  String get deviceTextXkb => 'PC / XKB Text Editing Shortcuts';
+
+  @override
   String get deviceTextWindows => 'Windows-Style Text Editing Shortcuts';
 
   @override
   String get deviceTextMacHint => '⌘← ⌘→ go to line start and end, ⌥← ⌥→ move by word, ⌘⌫ deletes to line start';
+
+  @override
+  String get deviceTextXkbHint => 'Home and End go to line start and end, Ctrl+← Ctrl+→ move by word';
 
   @override
   String get deviceTextWindowsHint => 'Home and End go to line start and end, Ctrl+← Ctrl+→ move by word';

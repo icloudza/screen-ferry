@@ -523,6 +523,53 @@ void main() {
     expect(patch.toJson(), {'role': 'client'});
   });
 
+  test('Linux、Windows、macOS 和未知系统分别显示自己的图标与名字', () {
+    expect(platformLabelOf('linux'), 'Linux');
+    expect(platformIconOf('linux'), Icons.computer_outlined);
+    expect(platformLabelOf('windows'), 'Windows');
+    expect(platformIconOf('windows'), Icons.desktop_windows_outlined);
+    expect(platformLabelOf('macos'), 'macOS');
+    expect(platformIconOf('macos'), Icons.desktop_mac_outlined);
+    expect(platformLabelOf(''), 'Unknown');
+    expect(platformIconOf(''), Icons.devices_other_outlined);
+    expect(keyboardKindOf('linux'), KeyboardKind.xkb);
+    expect(keyboardKindOf('windows'), KeyboardKind.xkb);
+    expect(keyboardKindOf('macos'), KeyboardKind.mac);
+    expect(keyboardKindOf(''), KeyboardKind.unknown);
+  });
+
+  testWidgets('Linux 当服务端时按 XKB 习惯显示，对端系统是 macOS', (tester) async {
+    final backend = DemoBackend(animate: false, platform: 'linux');
+    final state = await launch(tester, const Size(1160, 780), backend: backend);
+    expect(state.localIsMac, isFalse);
+    expect(state.peerIsMac(state.peers.first), isTrue);
+    expect(state.localIcon, Icons.computer_outlined);
+    state.openDevice(fingerprintOf(state, '办公室 PC'));
+    await settle(tester);
+    expect(find.text('PC / XKB 习惯'), findsOneWidget);
+    expect(find.text('文本编辑快捷键按 PC / XKB 习惯'), findsOneWidget);
+    expect(find.text('Home End 到行首行尾，Ctrl+← Ctrl+→ 按词移动'), findsOneWidget);
+    expect(find.textContaining('macOS · 指纹', findRichText: true), findsOneWidget);
+    expect(state.localName, 'Arch 主机');
+    expect(state.dataDir, '~/.local/share/screenferry');
+  });
+
+  testWidgets('未知系统不推断修饰键和文本快捷键的转换', (tester) async {
+    final backend = DemoBackend(animate: false, platform: 'unknown');
+    final state = await launch(tester, const Size(1160, 780), backend: backend);
+    final peer = state.peers.first;
+    expect(state.localKeyboard, KeyboardKind.unknown);
+    expect(state.peerKeyboard(peer), KeyboardKind.unknown);
+    expect(state.keyboardsDiffer(peer), isNull);
+
+    state.openDevice(peer.fingerprint);
+    await settle(tester);
+    expect(find.text('还不知道两台设备的键盘类型，修饰键先按原样发送。连上并交换系统信息后会自动调整。'), findsWidgets);
+    expect(find.text('文本编辑快捷键按 Mac 习惯'), findsNothing);
+    expect(find.text('文本编辑快捷键按 Windows 习惯'), findsNothing);
+    expect(find.text('文本编辑快捷键按 PC / XKB 习惯'), findsNothing);
+  });
+
   testWidgets('Windows 当服务端时按 Windows 的说法显示', (tester) async {
     final backend = DemoBackend(animate: false, platform: 'windows');
     final state = await launch(tester, const Size(1160, 780), backend: backend);

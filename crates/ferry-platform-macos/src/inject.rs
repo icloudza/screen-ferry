@@ -26,6 +26,7 @@ use objc2_core_graphics::{
     CGEvent, CGEventField, CGEventFilterMask, CGEventFlags, CGEventSource, CGEventSourceStateID,
     CGEventSuppressionState, CGEventTapLocation, CGEventType, CGMouseButton, CGScrollEventUnit,
 };
+use tracing::debug;
 
 use crate::capture::live_cursor;
 use crate::keymap::{mac_keycode, modifier_flag, nx_key};
@@ -251,6 +252,7 @@ impl MacInject {
             return Ok(());
         }
         let keycode = mac_keycode(code).ok_or(Error::Unsupported("没有对应 Mac 按键的键"))?;
+        debug!(?code, hid = code.raw(), keycode, ?action, "注入 macOS 按键");
         let down = action != KeyAction::Up;
         let modifier = modifier_flag(keycode).is_some();
         if modifier {

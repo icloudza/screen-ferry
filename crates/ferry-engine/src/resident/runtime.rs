@@ -303,7 +303,9 @@ impl<H: Host> Runtime<H> {
             name: self.name.clone(),
             clipboard: self.config.clipboard,
             clipboard_limit: self.clip_limit.clone(),
+            platform: self.host.platform(),
             command_key: uses_command_key(),
+            edge_drop: self.host.edge_drop(),
             store: self.store.clone(),
             announce: self.config.announce,
             events: self.events.clone(),
@@ -337,7 +339,9 @@ impl<H: Host> Runtime<H> {
             name: self.name.clone(),
             clipboard: self.config.clipboard,
             clipboard_limit: self.clip_limit.clone(),
+            platform: self.host.platform(),
             command_key: uses_command_key(),
+            edge_drop: self.host.edge_drop(),
             store: self.store.clone(),
             events: self.events.clone(),
             files: self.files.clone(),
@@ -677,6 +681,9 @@ impl<H: Host> Runtime<H> {
             }
             Event::PeerVersion { peer, version } => {
                 self.versions.insert(peer, version);
+            }
+            Event::PeerPlatform { peer, platform } => {
+                self.platforms.insert(peer, platform);
             }
             Event::PeerSettings { peer, sent } => {
                 let name = self.peer_name(&peer);

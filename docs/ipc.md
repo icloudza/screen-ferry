@@ -58,7 +58,7 @@
 
 ```text
 local     name · fingerprint · short · role(server|client) · data_dir · version · port（服务端监听的端口，否则 null）
-          platform（本机系统，macos|windows…；旧版后台没有，为空）
+          platform（本机系统，macos|windows|linux；旧版后台没有，为空）
           natural_scrolling（macOS：开着“自然滚动”；其他系统为 null）
           addresses[]（本机的局域网 IPv4 地址，常用的在前）· invite_port（客户端等邀请的端口，否则 null）
           system（本机系统和版本，例如“macOS 15.6 · arm64”）· verbose_since（详细记录从什么时候开着，Unix 毫秒；关着为 null）
@@ -71,7 +71,7 @@ clipboard null | { to_peer, peer, chars, bytes, preview, rich（带格式）, at
                  image（null | { width, height, path（预览用的 PNG 文件，存不下来时为 null）}） }
 peers[]   { name（它自己报的名字）, fingerprint, short, online, last_seen,
             side（服务端：在本机哪一侧；客户端为 null）, cursor（光标正在它上面）,
-            alias（本机给它起的名字，空为没起）, platform（macos|windows，本次运行还没看出来时为空）,
+            alias（本机给它起的名字，空为没起）, platform（macos|windows|linux，本次运行还没看出来或对方不支持时为空）,
             addr（上次连上的地址，没有为空；端口是缺省值时省略）,
             version（它的 ScreenFerry 版本，本次运行还没连上过为空） }
 found[]   { name, fingerprint, short, addr, paired }        只有客户端会有

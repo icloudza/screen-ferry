@@ -71,6 +71,8 @@ bitflags! {
         const SECURE_INPUT = 1 << 7;
         /// 被控端收不了键鼠时请控制端收回光标（`InputBlocked` 消息），不必断开连接。
         const INPUT_BLOCKED = 1 << 8;
+        /// 握手后互相告诉本机系统（`PlatformInfo` 消息）。
+        const PLATFORM_INFO = 1 << 9;
     }
 }
 

@@ -12,10 +12,22 @@ use ferry_types::{Config, DeviceSettings, ModifierPreset, uses_command_key};
 use tracing::{error, info};
 
 use crate::cli::{Mode, Options, Parsed};
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 use crate::pairing::TerminalConfirm;
 
 type AppResult = Result<Infallible, Box<dyn std::error::Error>>;
+
+#[cfg(target_os = "linux")]
+const PLATFORM: &str = "linux";
+#[cfg(target_os = "macos")]
+const PLATFORM: &str = "macos";
+#[cfg(target_os = "windows")]
+const PLATFORM: &str = "windows";
+
+#[cfg(target_os = "linux")]
+const EDGE_DROP: bool = false;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+const EDGE_DROP: bool = true;
 
 /// `serve`、`connect` 在自己开的控制台窗口里运行（Windows，见 [`init_output`]）。
 static OWN_CONSOLE: AtomicBool = AtomicBool::new(false);
@@ -113,6 +125,8 @@ pub(crate) fn run(options: Options) -> ExitCode {
 
                         clipboard_limit: Default::default(),
                         command_key: uses_command_key(),
+                        platform: PLATFORM,
+                        edge_drop: EDGE_DROP,
                         store,
                         announce,
                         events: Events::none(),
@@ -129,6 +143,8 @@ pub(crate) fn run(options: Options) -> ExitCode {
 
                         clipboard_limit: Default::default(),
                         command_key: uses_command_key(),
+                        platform: PLATFORM,
+                        edge_drop: EDGE_DROP,
                         store,
                         events: Events::none(),
                         files,
@@ -171,7 +187,7 @@ pub(crate) fn run(options: Options) -> ExitCode {
 /// 常驻运行。已经有一份在运行时，请它打开设置界面，然后退出。
 ///
 /// 主线程运行系统事件循环和托盘图标；引擎与本机通信在另一个线程的 tokio 运行时里。
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 fn resident(store: Store, autostart: bool) -> Result<(), Box<dyn std::error::Error>> {
     use ferry_engine::resident::{self, Command};
     use ferry_platform::EventLoop;
@@ -179,7 +195,15 @@ fn resident(store: Store, autostart: bool) -> Result<(), Box<dyn std::error::Err
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
-    if runtime.block_on(resident::hand_over_to_running(&store)) {
+    #[cfg(target_os = "linux")]
+    let instance =
+        ferry_platform_linux::LinuxInstanceLock::acquire(&store.root().join("instance.lock"))?;
+    let handed_over = runtime.block_on(resident::hand_over_to_running(&store));
+    #[cfg(target_os = "linux")]
+    if instance.is_none() && !handed_over {
+        return Err("另一份 ScreenFerry 正在启动，请稍后再试".into());
+    }
+    if handed_over {
         info!("ScreenFerry 已在运行，已请它打开设置界面");
         return Ok(());
     }
@@ -228,9 +252,9 @@ fn resident(store: Store, autostart: bool) -> Result<(), Box<dyn std::error::Err
     event_loop.run()
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
 fn resident(_store: Store, _autostart: bool) -> Result<(), Box<dyn std::error::Error>> {
-    Err("常驻运行目前只支持 macOS 和 Windows".into())
+    Err("常驻运行目前只支持 macOS、Windows 和 Linux".into())
 }
 
 fn report(result: Result<(), Box<dyn std::error::Error>>) -> ExitCode {
@@ -355,9 +379,28 @@ async fn serve(listen: SocketAddr, config: ServerConfig) -> AppResult {
     Ok(engine.await?)
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+#[cfg(target_os = "linux")]
+async fn serve(listen: SocketAddr, config: ServerConfig) -> AppResult {
+    use ferry_platform::Permissions;
+    use ferry_platform_linux::{LinuxCapture, LinuxClipboard, LinuxDisplays, LinuxPermissions};
+
+    LinuxPermissions.check_input()?;
+    let listener = tokio::net::TcpListener::bind(listen).await?;
+    let (capture, clipboard) = (LinuxCapture::new(), LinuxClipboard::new());
+    let engine = ferry_engine::serve(
+        listener,
+        config,
+        capture,
+        LinuxDisplays::new(),
+        clipboard,
+        TerminalConfirm,
+    );
+    Ok(engine.await?)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
 async fn serve(_listen: SocketAddr, _config: ServerConfig) -> AppResult {
-    Err("目前只能在 macOS 和 Windows 上运行 serve".into())
+    Err("目前只能在 macOS、Windows 和 Linux 上运行 serve".into())
 }
 
 #[cfg(target_os = "macos")]
@@ -393,7 +436,23 @@ async fn connect(config: ClientConfig) -> AppResult {
     Ok(engine.await?)
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+#[cfg(target_os = "linux")]
+async fn connect(config: ClientConfig) -> AppResult {
+    use ferry_platform::Permissions;
+    use ferry_platform_linux::{LinuxClipboard, LinuxDisplays, LinuxInject, LinuxPermissions};
+
+    LinuxPermissions.check_input()?;
+    let engine = ferry_engine::connect(
+        config,
+        LinuxInject::new()?,
+        LinuxDisplays::new(),
+        LinuxClipboard::new(),
+        TerminalConfirm,
+    );
+    Ok(engine.await?)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
 async fn connect(_config: ClientConfig) -> AppResult {
-    Err("目前只能在 macOS 和 Windows 上运行 connect".into())
+    Err("目前只能在 macOS、Windows 和 Linux 上运行 connect".into())
 }

@@ -8,6 +8,7 @@ mod edge_drop;
 mod events;
 mod files;
 mod invite;
+mod link;
 mod pairing;
 mod resident;
 mod server;

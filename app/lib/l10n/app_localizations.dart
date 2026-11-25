@@ -2264,6 +2264,18 @@ abstract class AppLocalizations {
   /// **'Mac 习惯'**
   String get deviceMacHabit;
 
+  /// No description provided for @deviceXkbHabit.
+  ///
+  /// In zh, this message translates to:
+  /// **'PC / XKB 习惯'**
+  String get deviceXkbHabit;
+
+  /// No description provided for @deviceKeyboardUnknown.
+  ///
+  /// In zh, this message translates to:
+  /// **'还不知道两台设备的键盘类型，修饰键先按原样发送。连上并交换系统信息后会自动调整。'**
+  String get deviceKeyboardUnknown;
+
   /// No description provided for @deviceWindowsHabit.
   ///
   /// In zh, this message translates to:
@@ -2300,6 +2312,12 @@ abstract class AppLocalizations {
   /// **'文本编辑快捷键按 Mac 习惯'**
   String get deviceTextMac;
 
+  /// No description provided for @deviceTextXkb.
+  ///
+  /// In zh, this message translates to:
+  /// **'文本编辑快捷键按 PC / XKB 习惯'**
+  String get deviceTextXkb;
+
   /// No description provided for @deviceTextWindows.
   ///
   /// In zh, this message translates to:
@@ -2311,6 +2329,12 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'⌘← ⌘→ 到行首行尾，⌥← ⌥→ 按词移动，⌘⌫ 删到行首'**
   String get deviceTextMacHint;
+
+  /// No description provided for @deviceTextXkbHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'Home End 到行首行尾，Ctrl+← Ctrl+→ 按词移动'**
+  String get deviceTextXkbHint;
 
   /// No description provided for @deviceTextWindowsHint.
   ///

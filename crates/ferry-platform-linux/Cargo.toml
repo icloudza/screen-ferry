@@ -1,0 +1,31 @@
+[package]
+name = "ferry-platform-linux"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+test = false
+
+[dependencies]
+ferry-platform.workspace = true
+ferry-types.workspace = true
+bitflags.workspace = true
+tracing.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+calloop.workspace = true
+libc.workspace = true
+wayland-backend.workspace = true
+wayland-client.workspace = true
+wayland-protocols = { workspace = true, features = ["unstable"] }
+wayland-protocols-wlr.workspace = true
+wayland-scanner.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

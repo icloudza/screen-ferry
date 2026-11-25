@@ -59,6 +59,7 @@ graph BT
   win --> trust
   mock --> trust
   mac[ferry-platform-macos] --> platform
+  linux[ferry-platform-linux] --> platform
   mock[ferry-platform-mock] --> platform
   net[ferry-net] --> proto
   net --> trust
@@ -73,11 +74,20 @@ graph BT
   daemon[ferry-daemon · L4] --> engine
   daemon -.按平台注入.-> win
   daemon -.按平台注入.-> mac
+  daemon -.按平台注入.-> linux
   service[ferry-service · L4] --> win
   app[设置界面 app/ · Flutter] -.本机回环 TCP.-> ipc
 ```
 
+Linux 面向 niri / Wayland：捕获端通过 layer-shell 上的 exclusive keyboard、pointer constraints 与 keyboard-shortcuts-inhibit 接收本机键鼠，
+抓取必须等指针锁定、键盘焦点和快捷键抑制都生效后才通知引擎；抑制被用户或合成器解除时立即交还本机控制。
+被控端用 virtual keyboard / virtual pointer 注入，显示器和光标坐标从 Wayland output 读取；不需要 root、uinput 或 evdev 权限。
+捕获层取得键盘焦点时读取当前 XKB keymap 并共享给虚拟键盘，布局变化后在下一次注入前刷新，避免按美式布局解释非美式键盘。
+Caps / Num / Scroll Lock 只依据 XKB 的 `mods_locked`；无法观察本机初始锁定状态时不猜测。剪贴板通过限时、限大小的
+`wl-copy` / `wl-paste` 子进程读写。托盘使用 KSNI，需要桌面提供 StatusNotifierItem 宿主；
+开机自启写入用户的 XDG autostart 目录。边缘拖放和应用内更新暂不支持。
+
 版本更新（ADR 0014）：`ferry-update` 校验更新清单的签名、判断有没有新版本，`ferry-net` 下载，
-`ferry-platform` 的 `Updater` 由各平台安装（macOS 交换应用、Windows 运行安装包），`ferry-engine` 把它们串起来。
+`ferry-platform` 的 `Updater` 由各平台安装（macOS 交换应用、Windows 运行安装包），`ferry-engine` 把它们串起来；Linux 暂不安装更新。
 
 `ferry-engine` 只认识 `ferry-platform` 的 trait；`ferry-daemon` 在编译时按目标平台选择实现并注入。场景测试中用 `ferry-platform-mock` 替代真实平台。

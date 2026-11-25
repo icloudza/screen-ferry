@@ -47,6 +47,14 @@ pub trait Host: Send + Sync + 'static {
 
     /// 本机缺省的设备名（计算机名）。
     fn device_name(&self) -> String;
+    /// 本机系统，例如 `macos`、`windows`、`linux`。
+    fn platform(&self) -> &'static str {
+        "test"
+    }
+    /// 本机是否支持屏幕边缘投递。
+    fn edge_drop(&self) -> bool {
+        true
+    }
     /// 检查本机作为 `role` 所需的权限。
     fn check_permissions(&self, role: Role) -> ferry_platform::Result<()>;
     fn capture(&self) -> ferry_platform::Result<Self::Capture>;

@@ -26,6 +26,8 @@ pub enum CaptureEvent {
         code: KeyCode,
         action: KeyAction,
     },
+    /// 抓取期间本机键盘焦点或指针锁定意外丢失，必须把控制权交还本机。
+    FocusLost,
 }
 
 /// 交给 sink 的一个捕获事件，带着它发生时是否处于抓取状态。

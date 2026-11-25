@@ -8,12 +8,12 @@
 
 mod app;
 mod cli;
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 mod host;
 mod logging;
 mod pairing;
 mod preview;
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 mod tray;
 
 use std::process::ExitCode;

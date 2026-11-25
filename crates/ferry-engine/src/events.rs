@@ -32,9 +32,11 @@ pub enum Event {
         name: String,
         fingerprint: Fingerprint,
         addr: SocketAddr,
-        /// 对方是什么系统（`macos`、`windows`）；看不出来时为 `None`。
+        /// 对方是什么系统（`macos`、`windows`、`linux`）；握手时还不知道时为 `None`。
         platform: Option<String>,
     },
+    /// 对方在握手后告诉了本机它的系统。
+    PeerPlatform { peer: Fingerprint, platform: String },
     /// 与 `peer` 的会话结束。`reason` 为 `None` 表示对方正常断开。
     Disconnected {
         peer: Fingerprint,

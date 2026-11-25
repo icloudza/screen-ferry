@@ -55,9 +55,54 @@ fn write(path: &Path, content: &[u8]) {
     fs::write(path, content).unwrap();
 }
 
+async fn transfer_without_edge_drop(linux_server: bool) {
+    let setup = if linux_server {
+        Setup {
+            mac_platform: "linux",
+            pc_platform: "macos",
+            mac_edge_drop: false,
+            pc_edge_drop: true,
+            ..Setup::default()
+        }
+    } else {
+        Setup {
+            mac_platform: "macos",
+            pc_platform: "linux",
+            mac_edge_drop: true,
+            pc_edge_drop: false,
+            ..Setup::default()
+        }
+    };
+    let rig = Rig::with(setup).await;
+    let source = TempDir::new();
+    let file = source.path().join("跨系统.txt");
+    let content = pattern(130_000);
+    write(&file, &content);
+
+    let (files, target) = if linux_server {
+        (&rig.mac_files, received(&rig.pc))
+    } else {
+        (&rig.pc_files, received(&rig.mac))
+    };
+    send_when_ready(files, vec![file]).await;
+    let got = target.join("跨系统.txt");
+    eventually("没有边缘投递也能收到文件", || got.is_file()).await;
+    assert_eq!(fs::read(got).unwrap(), content);
+}
+
 /// 每个字节都不一样的内容，错位、截断都能看出来。
 fn pattern(len: usize) -> Vec<u8> {
     (0..len).map(|i| (i * 7 % 251) as u8).collect()
+}
+
+#[tokio::test]
+async fn linux_server_without_edge_drop_still_sends_files_to_macos() {
+    transfer_without_edge_drop(true).await;
+}
+
+#[tokio::test]
+async fn linux_client_without_edge_drop_still_sends_files_to_macos() {
+    transfer_without_edge_drop(false).await;
 }
 
 #[tokio::test]

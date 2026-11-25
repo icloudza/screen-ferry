@@ -110,6 +110,12 @@ pub fn samples() -> Vec<(Channel, Message)> {
         ),
         (
             Channel::Input,
+            Message::PlatformInfo {
+                platform: "linux".into(),
+            },
+        ),
+        (
+            Channel::Input,
             Message::DropHint(DropHint {
                 state: HintState::Over,
                 along: 4_800,

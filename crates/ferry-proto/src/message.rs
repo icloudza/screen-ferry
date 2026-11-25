@@ -9,7 +9,7 @@ use crate::edge::DropHint;
 use crate::error::{DecodeError, EncodeError};
 use crate::file::{self, FileCancel, FileEnd, FileList, FileOffer, FileResume};
 use crate::handshake::{Bye, Channel, Hello, Reject, Welcome};
-use crate::limits::{MAX_DISPLAYS, MAX_VERSION_LEN, PAIRING_NONCE_LEN};
+use crate::limits::{MAX_DISPLAYS, MAX_PLATFORM_LEN, MAX_VERSION_LEN, PAIRING_NONCE_LEN};
 use crate::screen::Enter;
 use crate::transfer::{Cancel, Chunk};
 use crate::wire::{Body, Reader, Writer};
@@ -75,6 +75,10 @@ pub enum Message {
     AppInfo {
         version: String,
     },
+    /// 发送方的系统标识（`macos`、`windows` 或 `linux`），握手后发一次。需要 `PLATFORM_INFO` 能力。
+    PlatformInfo {
+        platform: String,
+    },
 
     // ── 数据连接 ──────────────────────────
     ClipboardOffer(ClipboardOffer),
@@ -127,6 +131,7 @@ mod ty {
     pub(super) const SECURE_CHALLENGE: u16 = 0x0107;
     pub(super) const SECURE_INPUT: u16 = 0x0108;
     pub(super) const INPUT_BLOCKED: u16 = 0x0109;
+    pub(super) const PLATFORM_INFO: u16 = 0x010A;
     pub(super) const KEY: u16 = 0x0110;
     pub(super) const POINTER_MOTION: u16 = 0x0120;
     pub(super) const POINTER_DELTA: u16 = 0x0121;
@@ -165,6 +170,7 @@ pub(crate) fn allowed(ty: u16, channel: Channel) -> Option<bool> {
         | ty::SECURE_CHALLENGE
         | ty::SECURE_INPUT
         | ty::INPUT_BLOCKED
+        | ty::PLATFORM_INFO
         | ty::KEY
         | ty::POINTER_MOTION
         | ty::POINTER_DELTA
@@ -217,6 +223,7 @@ impl Message {
             Self::OpenSettings => ty::OPEN_SETTINGS,
             Self::InputBlocked => ty::INPUT_BLOCKED,
             Self::AppInfo { .. } => ty::APP_INFO,
+            Self::PlatformInfo { .. } => ty::PLATFORM_INFO,
             Self::Input(event) => match event {
                 InputEvent::Key { .. } => ty::KEY,
                 InputEvent::PointerMotion { .. } => ty::POINTER_MOTION,
@@ -273,6 +280,7 @@ impl Message {
             Self::PeerSide { side } => side.encode(w),
             Self::DropHint(m) => m.encode(w),
             Self::AppInfo { version } => w.str(version, MAX_VERSION_LEN, "版本号长度"),
+            Self::PlatformInfo { platform } => w.str(platform, MAX_PLATFORM_LEN, "系统标识长度"),
             Self::ClipboardOffer(m) => m.encode(w),
             Self::ClipboardRequest(m) => m.encode(w),
             Self::Chunk(m) => m.encode(w),
@@ -356,6 +364,9 @@ impl Message {
             ty::INPUT_BLOCKED => Self::InputBlocked,
             ty::APP_INFO => Self::AppInfo {
                 version: r.str(MAX_VERSION_LEN, "版本号长度")?,
+            },
+            ty::PLATFORM_INFO => Self::PlatformInfo {
+                platform: r.str(MAX_PLATFORM_LEN, "系统标识长度")?,
             },
             _ => return Err(DecodeError::UnknownMessage(ty)),
         })

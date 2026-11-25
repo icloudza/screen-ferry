@@ -46,9 +46,7 @@ use crate::error::{Error, Result};
 use crate::events::{Event, Events};
 use crate::files::Files;
 use crate::heartbeat::{self, Heartbeat};
-use crate::link::{
-    DISPLAY_CHECK, HANDSHAKE_TIMEOUT, capabilities, frame_of, platform_of, primary_scale, send,
-};
+use crate::link::{DISPLAY_CHECK, HANDSHAKE_TIMEOUT, capabilities, frame_of, primary_scale, send};
 use crate::pairing::{self, ConfirmPairing, Outcome};
 
 /// 主循环交给一个会话、还没发出去的消息最多积压多少条。积压满了说明对方长时间收不动。
@@ -63,8 +61,12 @@ pub struct ServerConfig {
     pub clipboard: bool,
     /// 剪贴板单项的大小上限，会话中途也能改。
     pub clipboard_limit: ClipLimit,
+    /// 本机系统，例如 `macos`、`windows`、`linux`。
+    pub platform: &'static str,
     /// 本机的快捷键以 Command 键为主（macOS）。客户端与本机不同时，修饰键的“本机习惯”才互换 Command 与 Ctrl。
     pub command_key: bool,
+    /// 本机是否支持屏幕边缘投递。
+    pub edge_drop: bool,
     /// 数据目录：本机身份和已信任的设备。
     pub store: Store,
     /// 是否在局域网里用 mDNS 广播本机，让客户端不填地址也能找到。
@@ -206,6 +208,7 @@ struct Shared<P> {
     signer: Arc<InputSigner>,
     fingerprint: Fingerprint,
     name: String,
+    platform: &'static str,
     store: Store,
     events: Events,
     files: Files,
@@ -320,11 +323,12 @@ where
         neighbors.set_local_screens(&screens(&local));
         let (arrivals_tx, arrivals) = mpsc::channel(64);
         let shared = Arc::new(Shared {
-            capabilities: capabilities(config.clipboard, config.command_key),
+            capabilities: capabilities(config.clipboard, config.command_key, config.edge_drop),
             tls,
             signer,
             fingerprint: identity.fingerprint(),
             name: config.name.clone(),
+            platform: config.platform,
             store: config.store.clone(),
             events: config.events.clone(),
             files: config.files.clone(),
@@ -489,7 +493,7 @@ where
             name: hello.name,
             fingerprint: peer,
             addr,
-            platform: Some(platform_of(remote_command)),
+            platform: None,
         });
         self.publish_edges();
     }
@@ -557,6 +561,12 @@ where
                     version,
                 });
             }
+            Message::PlatformInfo { platform } => {
+                self.config.events.emit(Event::PeerPlatform {
+                    peer: session.peer,
+                    platform,
+                });
+            }
             other => debug!(kind = format_args!("{:#06x}", other.type_id()), "忽略消息"),
         }
     }
@@ -602,6 +612,16 @@ where
 
         match captured.event {
             CaptureEvent::Pointer { position, dx, dy } => {
+                debug!(
+                    ?position,
+                    dx,
+                    dy,
+                    grabbed = captured.grabbed,
+                    remote = remote.is_some(),
+                    current,
+                    local = ?self.local,
+                    "收到指针捕获事件"
+                );
                 if !current {
                     return;
                 }
@@ -676,6 +696,15 @@ where
                     for (code, action) in session.mapper.key(code, action) {
                         self.send_to(id, Message::Input(InputEvent::Key { code, action }));
                     }
+                }
+            }
+            CaptureEvent::FocusLost => {
+                if !current {
+                    return;
+                }
+                warn!("本机键盘焦点或指针锁定丢失，立即回到本机");
+                if let Some((id, t)) = self.neighbors.leave() {
+                    self.perform(id, t, false);
                 }
             }
         }
@@ -1016,6 +1045,9 @@ async fn handshake<P: ConfirmPairing>(
             if welcome.capabilities.contains(Capabilities::APP_INFO) {
                 send(&mut framed, &crate::link::app_info()).await?;
             }
+            if welcome.capabilities.contains(Capabilities::PLATFORM_INFO) {
+                send(&mut framed, &crate::link::platform_info(shared.platform)).await?;
+            }
             let new = NewSession {
                 id: welcome.session,
                 peer,
@@ -1147,7 +1179,8 @@ async fn run_session(
                         | Message::DropHint(_)
                         | Message::OpenSettings
                         | Message::InputBlocked
-                        | Message::AppInfo { .. }),
+                        | Message::AppInfo { .. }
+                        | Message::PlatformInfo { .. }),
                     ) => {
                         let _ = arrivals.send(Arrival::Message { id, message }).await;
                     }

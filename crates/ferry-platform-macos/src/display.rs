@@ -6,7 +6,8 @@
 use ferry_platform::{Displays, Error, Result};
 use ferry_types::{Display, DisplayId, Rect};
 use objc2_core_graphics::{
-    CGDirectDisplayID, CGDisplayBounds, CGError, CGGetActiveDisplayList, CGMainDisplayID,
+    CGDirectDisplayID, CGDisplayBounds, CGError, CGGetActiveDisplayList, CGGetOnlineDisplayList,
+    CGMainDisplayID,
 };
 
 const MAX_DISPLAYS: usize = 32;
@@ -23,6 +24,13 @@ impl Displays for MacDisplays {
         let err =
             unsafe { CGGetActiveDisplayList(MAX_DISPLAYS as u32, ids.as_mut_ptr(), &mut count) };
         check(err, "CGGetActiveDisplayList")?;
+        // 显示器休眠时 active list 为空，但 online list 仍保留几何信息。
+        if count == 0 {
+            let err = unsafe {
+                CGGetOnlineDisplayList(MAX_DISPLAYS as u32, ids.as_mut_ptr(), &mut count)
+            };
+            check(err, "CGGetOnlineDisplayList")?;
+        }
 
         let main = CGMainDisplayID();
         Ok(ids
